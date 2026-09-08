@@ -1,0 +1,33 @@
+services:
+  opencode-proxy:
+    image: caddy:2-alpine
+    container_name: opencode-proxy
+    restart: always
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    ports:
+      - "127.0.0.1:8089:8089"
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - opencode_proxy_data:/data
+      - opencode_proxy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - poki-net
+
+volumes:
+  opencode_proxy_data:
+    driver: local
+  opencode_proxy_config:
+    driver: local
+
+networks:
+  poki-net:
+    external: true
+    name: root_poki-net

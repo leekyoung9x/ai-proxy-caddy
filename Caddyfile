@@ -1,0 +1,18 @@
+:8089 {
+	handle_path /v1/* {
+		rewrite * /zen/v1{path}
+
+		reverse_proxy https://opencode.ai {
+			header_up Host opencode.ai
+			header_up x-opencode-session "hehe"
+			header_up x-opencode-client "desktop"
+		}
+	}
+}
+
+:8088 {
+	reverse_proxy https://openrouter.ai {
+		header_up Host openrouter.ai
+		header_up HTTP-Referer "https://hermes-agent.nousresearch.com"
+	}
+}
