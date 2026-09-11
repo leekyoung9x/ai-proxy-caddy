@@ -14,6 +14,7 @@ Run:  python3 inject.py  (env PORT, UPSTREAM, MODEL_ROUTES_JSON)
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import HTTPSConnection
 from urllib.parse import urlparse
@@ -28,6 +29,18 @@ except json.JSONDecodeError as e:
 
 _UP = urlparse(UPSTREAM)
 _UP_HOST = _UP.hostname or "xqapi.com"
+
+# Giờ cao điểm (giờ VN, UTC+7): failover TẮT. Ngoài khung → failover BẬT.
+# Peak = T2-T6: 07:00-08:00, 11:00-13:00, 17:00-07:00(hôm sau); T7+CN: cả ngày.
+VN_TZ = timezone(timedelta(hours=7))
+
+
+def is_peak(now=None):
+    now = now or datetime.now(VN_TZ)
+    if now.weekday() >= 5:  # Sat, Sun
+        return True
+    h = now.hour + now.minute / 60
+    return (7 <= h < 8) or (11 <= h < 13) or (h >= 17) or (h < 7)
 HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
@@ -72,7 +85,10 @@ def maybe_inject(body):
     route = MODEL_ROUTES.get(data.get("model", ""))
     if not route:
         return body, None  # unknown model: pass through untouched
-    data["routing"] = {"failover": route.get("failover", True),
+    failover = route.get("failover", True)
+    if failover == "auto":
+        failover = not is_peak()  # peak: khóa cứng; off-peak: cho fallback
+    data["routing"] = {"failover": bool(failover),
                        "route": route["route"],
                        "strategy": route.get("strategy", "auto")}
     return json.dumps(data, separators=(",", ":")).encode(), route["route"]
