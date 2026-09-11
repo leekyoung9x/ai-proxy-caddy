@@ -134,6 +134,10 @@ Route id xoay theo giờ nên **không hardcode** — injector GET
 (env `ROUTE_TTL_S`). API chết thì xài cache cũ; chưa có cache + không có
 `route` tĩnh dự phòng → `400` (fail closed).
 
+Route chết giữa chừng (502/503/504) → xóa cache, resolve lại ngay:
+khác route cũ thì retry 1 lần với route mới rồi trả tiếp; giống route cũ
+→ trả chết để 9Router điều sang model khác (log `RETRY`/`DEAD`).
+
 Luật chèn (fail closed):
 - Model có trong map → proxy **luôn overwrite** `routing` của client
   (client gửi gì cũng thua).

@@ -145,8 +145,8 @@ def maybe_inject(body):
     data["routing"] = {"failover": bool(failover),
                        "route": route_id,
                        "strategy": route.get("strategy", "auto")}
-    return json.dumps(data, separators=(",", ":")).encode(), \
-        f"{route_id} ({route_name})", None
+    info = {"id": route_id, "name": route_name}
+    return json.dumps(data, separators=(",", ":")).encode(), info, None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -159,11 +159,11 @@ class Handler(BaseHTTPRequestHandler):
         sys.stdout.flush()
 
     def _proxy(self):
-        body = read_body(self) if self.command in ("POST", "PUT", "PATCH") else b""
-        injected = None
+        orig = read_body(self) if self.command in ("POST", "PUT", "PATCH") else b""
+        body, injected, blocked = orig, None, None
         ctype = self.headers.get("Content-Type", "")
-        if body and "application/json" in ctype:
-            body, injected, blocked = maybe_inject(body)
+        if orig and "application/json" in ctype:
+            body, injected, blocked = maybe_inject(orig)
             if blocked:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
@@ -174,6 +174,40 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"BLOCKED {self.path}: {blocked}", flush=True)
                 return
 
+        resp, conn = self._forward(body)
+        if resp is None or conn is None:  # upstream unreachable
+            return
+        # Route chết (502/503/504) → xóa cache, resolve lại, khác route cũ
+        # thì retry 1 lần với route mới; giống route cũ → trả chết để
+        # 9Router điều sang model khác.
+        if resp.status in (502, 503, 504) and injected:
+            try:
+                model = json.loads(orig).get("model", "")
+            except Exception:
+                model = ""
+            if model:
+                old_id = injected["id"]
+                _ROUTE_CACHE.pop(model, None)
+                body2, info2, err2 = maybe_inject(orig)
+                if not err2 and info2 and info2["id"] != old_id:
+                    print(f"RETRY {model}: {old_id} -> {info2['id']} "
+                          f"({info2['name']})", flush=True)
+                    try:
+                        resp.read()
+                    except Exception:
+                        pass
+                    conn.close()
+                    resp, conn = self._forward(body2)
+                    if resp is None or conn is None:
+                        return
+                    body, injected = body2, info2
+                else:
+                    print(f"DEAD {model}: route {old_id} unchanged, "
+                          f"returning {resp.status}", flush=True)
+        self._relay(resp, conn, body, injected)
+
+    def _forward(self, body):
+        """Forward 1 request lên upstream. Trả (resp, conn) hoặc (None, None)."""
         conn = HTTPSConnection(_UP_HOST, _UP.port or 443, timeout=120)
         fwd = {}
         for k, v in self.headers.items():
@@ -186,17 +220,9 @@ class Handler(BaseHTTPRequestHandler):
             fwd["Content-Length"] = str(len(body))
         else:
             fwd.pop("Content-Length", None)
-
-        if body and injected:
-            try:
-                dbg = json.loads(body)
-                print(f"FINAL model={dbg.get('model')} routing={dbg.get('routing')}",
-                      flush=True)
-            except Exception:
-                pass
         try:
             conn.request(self.command, self.path, body=body or None, headers=fwd)
-            resp = conn.getresponse()
+            return conn.getresponse(), conn
         except Exception as e:
             self.send_response(502)
             self.send_header("Content-Type", "application/json")
@@ -204,8 +230,16 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"error":"upstream unreachable"}')
             print(f"UPSTREAM ERR {self.path}: {e}", flush=True)
-            return
+            return None, None
 
+    def _relay(self, resp, conn, body, injected):
+        if body and injected:
+            try:
+                dbg = json.loads(body)
+                print(f"FINAL model={dbg.get('model')} routing={dbg.get('routing')}",
+                      flush=True)
+            except Exception:
+                pass
         self.send_response(resp.status)
         rlen = None
         for k, v in resp.getheaders():
