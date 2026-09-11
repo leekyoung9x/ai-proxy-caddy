@@ -9,6 +9,7 @@ services:
     ports:
       - "127.0.0.1:8089:8089"
       - "127.0.0.1:8088:8088"
+      - "127.0.0.1:8087:8087"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - opencode_proxy_data:/data

@@ -16,3 +16,11 @@
 		header_up HTTP-Referer "https://hermes-agent.nousresearch.com"
 	}
 }
+
+:8087 {
+	reverse_proxy https://xqapi.com {
+		header_up Host xqapi.com
+		header_up X-XQAPI-Route "route-405"
+		header_up X-XQAPI-Failover "false"
+	}
+}

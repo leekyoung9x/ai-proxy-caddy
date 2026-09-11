@@ -28,14 +28,19 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
  │ 9Router / │ ──────────────────────────►────────► │openrouter  │
  │ New-API   │    + header_up HTTP-Referer          │  .ai       │
  └──────────┘                                     └────────────┘
+
+ ┌──────────┐   http://opencode-proxy:8087/*         ┌───────────┐
+ │ 9Router / │ ──────────────────────────►──────────► │ xqapi.com │
+ │ New-API   │    + header_up X-XQAPI-Route/Failover  │           │
+ └──────────┘                                       └───────────┘
 ```
 
 ## Files
 
 | File | Vai trò |
 |---|---|
-| `Caddyfile` | Định nghĩa 2 site `:8089` (opencode) và `:8088` (openrouter) |
-| `docker-compose.yml` | Chạy 1 container `caddy:2-alpine`, bind `127.0.0.1:8088-8089`, join network `root_poki-net` (external) |
+| `Caddyfile` | Định nghĩa 3 site `:8089` (opencode), `:8088` (openrouter), `:8087` (xqapi) |
+| `docker-compose.yml` | Chạy 1 container `caddy:2-alpine`, bind `127.0.0.1:8087-8089`, join network `root_poki-net` (external) |
 | `.gitignore` | Bỏ qua data/volumes local |
 
 ## Cấu hình chi tiết
@@ -65,6 +70,15 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 - Base URL cho client: `http://opencode-proxy:8088/api/v1`
   (`GET /api/v1/models` → `200`).
 
+### :8087 → XQAPI (`https://xqapi.com`)
+
+- Forward nguyên path, chỉ gắn:
+  - `Host: xqapi.com`
+  - `X-XQAPI-Route: route-405`
+  - `X-XQAPI-Failover: false`
+- Base URL cho client: `http://opencode-proxy:8087`
+  (từ host: `http://127.0.0.1:8087`), giữ nguyên path của upstream.
+
 ## Chạy
 
 Yêu cầu: Docker + Docker Compose, và Docker network dùng chung đã tồn tại
@@ -80,6 +94,7 @@ docker compose up -d
 # kiểm tra
 curl http://127.0.0.1:8089/v1/models
 curl http://127.0.0.1:8088/api/v1/models
+curl http://127.0.0.1:8087/
 ```
 
 Gọi chat OpenCode Zen (key public free tier):
@@ -99,6 +114,7 @@ tên service, **không** dùng `127.0.0.1` (nó sẽ trỏ vào chính container
 
 - OpenCode Zen channel base URL: `http://opencode-proxy:8089/v1`
 - OpenRouter channel base URL: `http://opencode-proxy:8088/api/v1`
+- XQAPI base URL: `http://opencode-proxy:8087` (giữ nguyên path upstream)
 
 ## Pitfall đã gặp (đọc trước khi debug)
 
