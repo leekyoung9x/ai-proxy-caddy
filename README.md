@@ -131,6 +131,14 @@ Luật chèn: chỉ chèn khi body là JSON object **chưa** có field `routing`
 (client tự gửi `routing` thì tôn trọng của client). Model không có trong map
 → pass-through nguyên (như generic).
 
+Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
+
+| Model | Route |
+|---|---|
+| `deepseek-v4-flash` | `route-405` |
+| `deepseek-flash` | `route-405` |
+| `glm-5.3-flash` | `route-587` |
+
 Thêm model mới (ví dụ `qwen-flash` → route-999). Checklist:
 
 1. Thêm entry vào `MODEL_ROUTES_JSON` của service `xq-inject` trong
