@@ -1,16 +1,15 @@
 """xq-inject: body injector for XQAPI (https://xqapi.com).
 
-Sits between Caddy and XQAPI. For POSTs with a JSON body under a mapped
-prefix, injects a default `routing` object (route lock) into the JSON body
-unless the client already sent its own `routing` (client wins).
+Sits between internal clients (9Router, curl) and XQAPI. For POSTs with a
+JSON body, looks at the body's `model` field and injects a default `routing`
+object (route lock) from the model -> routing map, unless the client already
+sent its own `routing` (client wins). Models not in the map pass through
+untouched (like the old /generic path).
 
-Prefix -> routing map comes from ROUTES_JSON env:
-  {"ds": {"route": "route-405", "strategy": "auto", "failover": true}, ...}
+Map comes from MODEL_ROUTES_JSON env:
+  {"deepseek-v4-flash": {"route": "route-405", "strategy": "auto", "failover": true}, ...}
 
-The prefix itself is passed by Caddy in X-XQAPI-Prefix header (Caddy already
-stripped the prefix from the path via handle_path).
-
-Run:  python3 inject.py  (env PORT, UPSTREAM, ROUTES_JSON)
+Run:  python3 inject.py  (env PORT, UPSTREAM, MODEL_ROUTES_JSON)
 """
 import json
 import os
@@ -22,10 +21,10 @@ from urllib.parse import urlparse
 PORT = int(os.environ.get("PORT", "8091"))
 UPSTREAM = os.environ.get("UPSTREAM", "https://xqapi.com")
 try:
-    ROUTES = json.loads(os.environ.get("ROUTES_JSON", "{}"))
+    MODEL_ROUTES = json.loads(os.environ.get("MODEL_ROUTES_JSON", "{}"))
 except json.JSONDecodeError as e:
-    print(f"BAD ROUTES_JSON: {e}", flush=True)
-    ROUTES = {}
+    print(f"BAD MODEL_ROUTES_JSON: {e}", flush=True)
+    MODEL_ROUTES = {}
 
 _UP = urlparse(UPSTREAM)
 _UP_HOST = _UP.hostname or "xqapi.com"
@@ -57,22 +56,26 @@ def read_body(handler):
     return b""
 
 
-def maybe_inject(path, body, prefix):
-    """Inject default routing into JSON body. Returns (new_body, injected_bool)."""
-    route = ROUTES.get(prefix or "")
-    if not route or not body:
-        return body, False
+def maybe_inject(body):
+    """Inject default routing based on body's model field.
+    Returns (new_body, injected_route_or_None)."""
+    if not body:
+        return body, None
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return body, False
+        return body, None
     if not isinstance(data, dict):
-        return body, False
+        return body, None
     if "routing" in data and isinstance(data["routing"], dict):
-        return body, False  # client already pins routing; respect it
-    data["routing"] = {"failover": True, "route": route["route"],
+        return body, None  # client already pins routing; respect it
+    route = MODEL_ROUTES.get(data.get("model", ""))
+    if not route:
+        return body, None  # unknown model: pass through untouched
+    data["routing"] = {"failover": route.get("failover", True),
+                       "route": route["route"],
                        "strategy": route.get("strategy", "auto")}
-    return json.dumps(data, separators=(",", ":")).encode(), True
+    return json.dumps(data, separators=(",", ":")).encode(), route["route"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -85,12 +88,11 @@ class Handler(BaseHTTPRequestHandler):
         sys.stdout.flush()
 
     def _proxy(self):
-        prefix = self.headers.get("X-XQAPI-Prefix", "")
         body = read_body(self) if self.command in ("POST", "PUT", "PATCH") else b""
-        injected = False
+        injected = None
         ctype = self.headers.get("Content-Type", "")
         if body and "application/json" in ctype:
-            body, injected = maybe_inject(self.path, body, prefix)
+            body, injected = maybe_inject(body)
 
         conn = HTTPSConnection(_UP_HOST, _UP.port or 443, timeout=120)
         fwd = {}
@@ -114,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "26")
             self.end_headers()
             self.wfile.write(b'{"error":"upstream unreachable"}')
-            print(f"UPSTREAM ERR {self.path} prefix={prefix}: {e}", flush=True)
+            print(f"UPSTREAM ERR {self.path}: {e}", flush=True)
             return
 
         self.send_response(resp.status)
@@ -139,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
                 break
         conn.close()
         if injected:
-            print(f"INJECTED routing prefix={prefix} {self.path}", flush=True)
+            print(f"INJECTED routing={injected} {self.path}", flush=True)
 
     do_GET = _proxy
     do_POST = _proxy
@@ -150,5 +152,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"xq-inject on :{PORT} -> {UPSTREAM} routes={list(ROUTES)}", flush=True)
+    print(f"xq-inject on :{PORT} -> {UPSTREAM} models={list(MODEL_ROUTES)}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
