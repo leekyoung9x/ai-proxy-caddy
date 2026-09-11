@@ -135,11 +135,11 @@ Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
 
 | Model | Route | Failover |
 |---|---|---|
-| `deepseek-v4-flash` | `route-405` | `auto` (peak khóa cứng, off-peak cho fallback) |
+| `deepseek-v4-flash` | `route-405` | `auto` (chỉ fallback trong khung giảm giá, còn lại khóa cứng) |
 | `deepseek-flash` | `route-405` | `auto` |
 | `glm-5.3-flash` | `route-587` | `false` (khóa cứng) |
 
-Peak (giờ VN): T2-T6 07:00-08:00, 11:00-13:00, 17:00-07:00; T7+CN cả ngày.
+Khung giảm giá 50% (giờ VN): T2-T6 07:00-08:00, 11:00-13:00, 17:00-07:00; T7+CN cả ngày.
 
 Thêm model mới (ví dụ `qwen-flash` → route-999). Checklist:
 

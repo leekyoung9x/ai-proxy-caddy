@@ -30,12 +30,12 @@ except json.JSONDecodeError as e:
 _UP = urlparse(UPSTREAM)
 _UP_HOST = _UP.hostname or "xqapi.com"
 
-# Giờ cao điểm (giờ VN, UTC+7): failover TẮT. Ngoài khung → failover BẬT.
-# Peak = T2-T6: 07:00-08:00, 11:00-13:00, 17:00-07:00(hôm sau); T7+CN: cả ngày.
+# Khung GIẢM GIÁ 50% (giờ VN, UTC+7): failover BẬT. Ngoài khung → khóa cứng.
+# Discount = T2-T6: 07:00-08:00, 11:00-13:00, 17:00-07:00(hôm sau); T7+CN: cả ngày.
 VN_TZ = timezone(timedelta(hours=7))
 
 
-def is_peak(now=None):
+def is_discount(now=None):
     now = now or datetime.now(VN_TZ)
     if now.weekday() >= 5:  # Sat, Sun
         return True
@@ -87,7 +87,7 @@ def maybe_inject(body):
         return body, None  # unknown model: pass through untouched
     failover = route.get("failover", True)
     if failover == "auto":
-        failover = not is_peak()  # peak: khóa cứng; off-peak: cho fallback
+        failover = is_discount()  # chỉ fallback trong khung giảm giá
     data["routing"] = {"failover": bool(failover),
                        "route": route["route"],
                        "strategy": route.get("strategy", "auto")}
