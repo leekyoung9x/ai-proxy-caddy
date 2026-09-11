@@ -70,28 +70,31 @@ def read_body(handler):
 
 
 def maybe_inject(body):
-    """Inject default routing based on body's model field.
-    Returns (new_body, injected_route_or_None)."""
+    """Hard-lock mapped models to their XQAPI route. Proxy ALWAYS wins over
+    client-sent routing. Returns (new_body, route_id, block_error):
+      - (body, None, None): passthrough (no body / not JSON / no model field)
+      - (None, None, err): FAIL CLOSED, unknown model, do not forward
+      - (new_body, route, None): routing overwritten with locked values
+    """
     if not body:
-        return body, None
+        return body, None, None
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return body, None
-    if not isinstance(data, dict):
-        return body, None
-    if "routing" in data and isinstance(data["routing"], dict):
-        return body, None  # client already pins routing; respect it
-    route = MODEL_ROUTES.get(data.get("model", ""))
+        return body, None, None
+    if not isinstance(data, dict) or not data.get("model"):
+        return body, None, None
+    route = MODEL_ROUTES.get(data["model"])
     if not route:
-        return body, None  # unknown model: pass through untouched
+        return None, None, f"No locked route configured for model: {data['model']}"
     failover = route.get("failover", True)
     if failover == "auto":
         failover = is_discount()  # chỉ fallback trong khung giảm giá
+    # Proxy luôn overwrite routing của client.
     data["routing"] = {"failover": bool(failover),
                        "route": route["route"],
                        "strategy": route.get("strategy", "auto")}
-    return json.dumps(data, separators=(",", ":")).encode(), route["route"]
+    return json.dumps(data, separators=(",", ":")).encode(), route["route"], None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -108,7 +111,16 @@ class Handler(BaseHTTPRequestHandler):
         injected = None
         ctype = self.headers.get("Content-Type", "")
         if body and "application/json" in ctype:
-            body, injected = maybe_inject(body)
+            body, injected, blocked = maybe_inject(body)
+            if blocked:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                payload = json.dumps({"error": blocked}).encode()
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                print(f"BLOCKED {self.path}: {blocked}", flush=True)
+                return
 
         conn = HTTPSConnection(_UP_HOST, _UP.port or 443, timeout=120)
         fwd = {}
@@ -123,6 +135,13 @@ class Handler(BaseHTTPRequestHandler):
         else:
             fwd.pop("Content-Length", None)
 
+        if body and injected:
+            try:
+                dbg = json.loads(body)
+                print(f"FINAL model={dbg.get('model')} routing={dbg.get('routing')}",
+                      flush=True)
+            except Exception:
+                pass
         try:
             conn.request(self.command, self.path, body=body or None, headers=fwd)
             resp = conn.getresponse()

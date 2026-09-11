@@ -127,9 +127,11 @@ mặc định từ map `MODEL_ROUTES_JSON`:
   → xq-inject: chèn routing theo MODEL → https://xqapi.com
 ```
 
-Luật chèn: chỉ chèn khi body là JSON object **chưa** có field `routing`
-(client tự gửi `routing` thì tôn trọng của client). Model không có trong map
-→ pass-through nguyên (như generic).
+Luật chèn (fail closed):
+- Model có trong map → proxy **luôn overwrite** `routing` của client
+  (client gửi gì cũng thua).
+- Model không có trong map → trả `400`, **không forward** lên XQAPI.
+- Body không phải JSON chat (GET, không có field `model`) → pass-through nguyên.
 
 Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
 
@@ -153,7 +155,14 @@ Thêm model mới (ví dụ `qwen-flash` → route-999). Checklist:
    official — đã dính 1 lần).
 3. Test nhanh từ host:
    `curl -X POST http://127.0.0.1:8091/v1/chat/completions -H 'Authorization: Bearer <KEY>' -H 'Content-Type: application/json' -d '{"model":"qwen-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'`
-   + coi log `docker logs xq-inject` có dòng `INJECTED routing=route-999`.
+   + coi log `docker logs xq-inject` có dòng `INJECTED routing=route-999`
+   và `FINAL model=qwen-flash routing={...}`.
+
+> Khóa phía key (làm bên console XQAPI, không phải proxy):
+> `Binding group = [temporary] super discounted channel`,
+> `Incident convert move = OFF`, `Only binding groups = ON`,
+> `Allow request override = ON`.
+> Proxy khóa route, key khóa group — thiếu 1 trong 2 vẫn lọt official.
 
 ## Pitfall đã gặp (đọc trước khi debug)
 
