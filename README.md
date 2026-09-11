@@ -136,7 +136,10 @@ Route id xoay theo giờ nên **không hardcode** — injector GET
 
 Route chết giữa chừng (502/503/504) → xóa cache, resolve lại ngay:
 khác route cũ thì retry 1 lần với route mới rồi trả tiếp; giống route cũ
-→ trả chết để 9Router điều sang model khác (log `RETRY`/`DEAD`).
+→ nếu entry `auto` + lần đầu bị khóa + giờ đã vào khung giảm giá thì mở
+`failover=true` retry 1 lần cuối (log `RETRY-FO`), còn lại (khóa `false`
+cứng, hoặc vẫn ngoài khung) → trả chết để 9Router điều sang model khác
+(log `DEAD`).
 
 Luật chèn (fail closed):
 - Model có trong map → proxy **luôn overwrite** `routing` của client
