@@ -202,8 +202,38 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     body, injected = body2, info2
                 else:
-                    print(f"DEAD {model}: route {old_id} unchanged, "
-                          f"returning {resp.status}", flush=True)
+                    # Giống route cũ: nếu entry là auto + giờ đã vào khung
+                    # giảm giá + lần đầu bị khóa → mở failover retry 1 lần
+                    # cuối; còn lại trả chết để 9Router điều model khác.
+                    cfg_fo = MODEL_ROUTES.get(model, {}).get("failover", True)
+                    used_fo = None
+                    try:
+                        used_fo = json.loads(body).get("routing", {}).get("failover")
+                    except Exception:
+                        pass
+                    if cfg_fo == "auto" and used_fo is False and is_discount():
+                        print(f"RETRY-FO {model}: locked before, "
+                              f"discount window now -> failover=true", flush=True)
+                        try:
+                            d3 = json.loads(orig)
+                            d3["routing"] = dict(d3.get("routing", {}))
+                            d3["routing"]["failover"] = True
+                            body3 = json.dumps(d3, separators=(",", ":")).encode()
+                        except Exception:
+                            body3 = None
+                        if body3:
+                            try:
+                                resp.read()
+                            except Exception:
+                                pass
+                            conn.close()
+                            resp, conn = self._forward(body3)
+                            if resp is None or conn is None:
+                                return
+                            body = body3
+                    if resp.status in (502, 503, 504):
+                        print(f"DEAD {model}: route {old_id} unchanged, "
+                              f"returning {resp.status}", flush=True)
         self._relay(resp, conn, body, injected)
 
     def _forward(self, body):
