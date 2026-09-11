@@ -29,18 +29,20 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
  │ New-API   │    + header_up HTTP-Referer          │  .ai       │
  └──────────┘                                     └────────────┘
 
- ┌──────────┐   http://opencode-proxy:8087/*         ┌───────────┐
- │ 9Router / │ ──────────────────────────►──────────► │ xqapi.com │
- │ New-API   │    + header_up X-XQAPI-Route/Failover  │           │
- └──────────┘                                       └───────────┘
+ ┌──────────┐   https://xq.cutes1tg.online/ds/*      ┌────────────┐
+ │ 9Router   │ ──► Caddy strip /ds ──► xq-inject ──► │ xqapi.com  │
+ │           │     + chèn routing vào JSON body      │            │
+ └──────────┘                                       └────────────┘
 ```
+(Chi tiết + checklist thêm model mới xem mục "Front bằng path prefix" bên dưới.)
 
 ## Files
 
 | File | Vai trò |
 |---|---|
-| `Caddyfile` | Định nghĩa 3 site `:8089` (opencode), `:8088` (openrouter), `:8087` (xqapi) |
-| `docker-compose.yml` | Chạy 1 container `caddy:2-alpine`, bind `127.0.0.1:8087-8089`, join network `root_poki-net` (external) |
+| `Caddyfile` | Proxy localhost: `:8089` (opencode), `:8088` (openrouter), `:8087` (xqapi raw) |
+| `xq-inject/inject.py` | Chèn `routing` (route lock) vào JSON body cho XQAPI, stream SSE passthrough |
+| `docker-compose.yml` | Chạy 2 container (`opencode-proxy` + `xq-inject`), join network `root_poki-net` (external) |
 | `.gitignore` | Bỏ qua data/volumes local |
 
 ## Cấu hình chi tiết
@@ -116,21 +118,26 @@ tên service, **không** dùng `127.0.0.1` (nó sẽ trỏ vào chính container
 - OpenRouter channel base URL: `http://opencode-proxy:8088/api/v1`
 - XQAPI base URL: `http://opencode-proxy:8087` (giữ nguyên path upstream)
 
-## Front bằng path prefix trên 1 domain (Caddy chính, có TLS)
+## Front bằng path prefix trên 1 domain (Caddy chính + xq-inject, có TLS)
 
-> Config này nằm ở `/root/Caddyfile` trên VPS (Caddy chính, port 443),
-> **không** nằm trong repo này. Ghi lại để khỏi quên.
+> Config Caddy nằm ở `/root/Caddyfile` trên VPS (Caddy chính, port 443),
+> **không** nằm trong repo này. `xq-inject/` trong repo này. Ghi lại để khỏi quên.
 
-Mỗi model XQAPI = 1 path prefix = 1 `X-XQAPI-Route` id (chỉ cần 1 DNS + 1 cert):
+XQAPI khóa route bằng field `routing` trong JSON body (header `X-XQAPI-Route`
+không có tác dụng). Caddy không sửa được body nên chain là:
+
+```
+client → Caddy (strip /ds, gắn header X-XQAPI-Prefix) → xq-inject
+       → chèn routing mặc định vào JSON body → https://xqapi.com
+```
 
 ```caddy
+# /root/Caddyfile
 xq.cutes1tg.online {
     encode gzip zstd
     handle_path /ds/* {
-        reverse_proxy https://xqapi.com {
-            header_up Host xqapi.com
-            header_up X-XQAPI-Route "route-405"
-            header_up X-XQAPI-Failover "false"
+        reverse_proxy http://xq-inject:8091 {
+            header_up X-XQAPI-Prefix "ds"
         }
     }
     handle_path /generic/* {
@@ -144,18 +151,35 @@ xq.cutes1tg.online {
 }
 ```
 
-Thêm model mới: copy 1 block `handle_path`, đổi prefix + route id. Checklist:
+`xq-inject` đọc map prefix → routing từ env `ROUTES_JSON`
+(hiện tại: `{"ds":{"route":"route-405","strategy":"auto","failover":true}}`).
+Luật chèn: chỉ chèn khi body là JSON object **chưa** có field `routing`
+(client tự gửi `routing` thì tôn trọng của client).
+
+Mỗi model XQAPI = 1 path prefix = 1 entry trong `ROUTES_JSON` (chỉ cần 1 DNS + 1 cert):
+
+Thêm model mới (ví dụ prefix `/qwen` → route-999). Checklist:
 
 1. (Một lần duy nhất) DNS record `xq` bên Cloudflare trỏ về VPS.
-2. Validate: `docker exec poki-caddy caddy validate --config /tmp/Caddyfile.new --adapter caddyfile`
-3. Reload (không restart Caddy chính):
-   `docker cp /root/Caddyfile poki-caddy:/tmp/Caddyfile.new && docker exec poki-caddy caddy reload --config /tmp/Caddyfile.new --adapter caddyfile`
+2. Thêm block Caddy trong `/root/Caddyfile`:
+   ```caddy
+   handle_path /qwen/* {
+       reverse_proxy http://xq-inject:8091 {
+           header_up X-XQAPI-Prefix "qwen"
+       }
+   }
+   ```
+3. Thêm entry vào `ROUTES_JSON` của service `xq-inject` trong
+   `docker-compose.yml`: `"qwen":{"route":"route-999","strategy":"auto","failover":true}`,
+   rồi `docker compose up -d xq-inject`.
+4. Validate + reload Caddy chính (không restart):
+   `docker cp /root/Caddyfile poki-caddy:/tmp/Caddyfile.new && docker exec poki-caddy caddy validate --config /tmp/Caddyfile.new --adapter caddyfile && docker exec poki-caddy caddy reload --config /tmp/Caddyfile.new --adapter caddyfile`
    (⚠️ sửa `/root/Caddyfile` bằng rewrite sẽ gãy bind-mount inode cũ → container
    vẫn thấy bản cũ. Nên `docker cp` + reload như trên; lần restart container sau
    mount sẽ đọc lại bản mới.)
-4. Base URL cho 9router: `https://xq.cutes1tg.online/ds`,
-   `https://xq.cutes1tg.online/generic` (prefix giữ nguyên, path sau đó
-   pass-through lên upstream).
+5. Base URL cho 9router: `https://xq.cutes1tg.online/qwen/v1`.
+   ⚠️ prefix node trong 9Router **không** được trùng builtin (`ds` = DeepSeek
+   official — đã dính 1 lần, phải đổi thành `xqds`).
 
 ## Pitfall đã gặp (đọc trước khi debug)
 

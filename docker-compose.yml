@@ -22,6 +22,30 @@ services:
     networks:
       - poki-net
 
+  # XQAPI body injector: chèn routing (route lock) vào JSON body theo prefix.
+  # Caddy strip prefix rồi forward vào đây kèm header X-XQAPI-Prefix.
+  xq-inject:
+    image: python:3.12-alpine
+    container_name: xq-inject
+    restart: always
+    command: ["python3", "/app/inject.py"]
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      PORT: "8091"
+      UPSTREAM: "https://xqapi.com"
+      ROUTES_JSON: '{"ds":{"route":"route-405","strategy":"auto","failover":true}}'
+    volumes:
+      - ./xq-inject/inject.py:/app/inject.py:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - poki-net
+
 volumes:
   opencode_proxy_data:
     driver: local
