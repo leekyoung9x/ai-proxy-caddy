@@ -116,6 +116,41 @@ tên service, **không** dùng `127.0.0.1` (nó sẽ trỏ vào chính container
 - OpenRouter channel base URL: `http://opencode-proxy:8088/api/v1`
 - XQAPI base URL: `http://opencode-proxy:8087` (giữ nguyên path upstream)
 
+## Front bằng subdomain (Caddy chính, có TLS)
+
+> Config này nằm ở `/root/Caddyfile` trên VPS (Caddy chính, port 443),
+> **không** nằm trong repo này. Ghi lại để khỏi quên.
+
+Mỗi model XQAPI = 1 subdomain = 1 `X-XQAPI-Route` id:
+
+```caddy
+xq-ds.cutes1tg.online {
+    encode gzip zstd
+    reverse_proxy https://xqapi.com {
+        header_up Host xqapi.com
+        header_up X-XQAPI-Route "route-405"
+        header_up X-XQAPI-Failover "false"
+    }
+}
+xq-generic.cutes1tg.online {
+    encode gzip zstd
+    reverse_proxy https://xqapi.com {
+        header_up Host xqapi.com
+    }
+}
+```
+
+Thêm model mới: copy 1 block, đổi tên subdomain + route id. Checklist:
+
+1. Thêm DNS record bên Cloudflare cho subdomain (không có wildcard) → mới có TLS.
+2. Validate: `docker exec poki-caddy caddy validate --config /tmp/Caddyfile.new --adapter caddyfile`
+3. Reload (không restart Caddy chính):
+   `docker cp /root/Caddyfile poki-caddy:/tmp/Caddyfile.new && docker exec poki-caddy caddy reload --config /tmp/Caddyfile.new --adapter caddyfile`
+   (⚠️ sửa `/root/Caddyfile` bằng rewrite sẽ gãy bind-mount inode cũ → container
+   vẫn thấy bản cũ. Nên `docker cp` + reload như trên; lần restart container sau
+   mount sẽ đọc lại bản mới.)
+4. Base URL cho 9router: `https://xq-ds.cutes1tg.online` (giữ nguyên path upstream).
+
 ## Pitfall đã gặp (đọc trước khi debug)
 
 1. **`ECONNREFUSED 127.0.0.1:PORT` từ container khác** → sai host. Container
