@@ -37,7 +37,7 @@ services:
     environment:
       PORT: "8091"
       UPSTREAM: "https://xqapi.com"
-      MODEL_ROUTES_JSON: '{"deepseek-v4-flash":{"route":"route-405","strategy":"auto","failover":"auto"},"deepseek-flash":{"route":"route-405","strategy":"auto","failover":"auto"},"glm-5.3-flash":{"route":"route-587","strategy":"auto","failover":false}}'
+      MODEL_ROUTES_JSON: '{"deepseek-v4-flash":{"strategy":"auto","failover":"auto"},"deepseek-flash":{"strategy":"auto","failover":"auto"},"glm-5.3-flash":{"strategy":"auto","failover":false}}'
     volumes:
       - ./xq-inject/inject.py:/app/inject.py:ro
     logging:

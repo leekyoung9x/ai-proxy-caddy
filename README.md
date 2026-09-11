@@ -124,8 +124,15 @@ mặc định từ map `MODEL_ROUTES_JSON`:
 
 ```
 9Router (node prefix `xq`, baseUrl http://xq-inject:8091/v1)
-  → xq-inject: chèn routing theo MODEL → https://xqapi.com
+  → xq-inject: resolve route rẻ nhất còn sống từ public API XQAPI,
+    chèn routing theo MODEL → https://xqapi.com
 ```
+
+Route id xoay theo giờ nên **không hardcode** — injector GET
+`/api/public/models/<model>`, lọc `available`, ưu tiên `healthy` → rẻ nhất
+(`officialPriceRatio` thấp nhất) → latency thấp nhất, cache 5 phút
+(env `ROUTE_TTL_S`). API chết thì xài cache cũ; chưa có cache + không có
+`route` tĩnh dự phòng → `400` (fail closed).
 
 Luật chèn (fail closed):
 - Model có trong map → proxy **luôn overwrite** `routing` của client
@@ -135,11 +142,14 @@ Luật chèn (fail closed):
 
 Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
 
-| Model | Route | Failover |
+| Model | Failover | Route hiện tại* |
 |---|---|---|
-| `deepseek-v4-flash` | `route-405` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng |
-| `deepseek-flash` | `route-405` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng |
-| `glm-5.3-flash` | `route-587` | `false` = khóa cứng mọi khung giờ |
+| `deepseek-v4-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%) |
+| `deepseek-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%) |
+| `glm-5.3-flash` | `false` = khóa cứng mọi khung giờ | động (temp 1%) |
+
+\*Route resolve động theo giờ, coi log `FINAL model=... routing={...}` để biết
+route đang dùng.
 
 Khung giảm giá 50% (giờ VN): T2-T6 07:00-08:00, 11:00-13:00, 17:00-07:00; T7+CN cả ngày.
 

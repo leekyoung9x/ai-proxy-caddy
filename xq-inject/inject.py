@@ -1,15 +1,17 @@
 """xq-inject: body injector for XQAPI (https://xqapi.com).
 
 Sits between internal clients (9Router, curl) and XQAPI. For POSTs with a
-JSON body, looks at the body's `model` field and injects a default `routing`
-object (route lock) from the model -> routing map, unless the client already
-sent its own `routing` (client wins). Models not in the map pass through
-untouched (like the old /generic path).
+JSON body, looks at the body's `model` field and injects a `routing` object
+(route lock) from the model -> routing map. Proxy ALWAYS overwrites
+client-sent routing; unknown models are rejected (fail closed).
 
-Map comes from MODEL_ROUTES_JSON env:
-  {"deepseek-v4-flash": {"route": "route-405", "strategy": "auto", "failover": true}, ...}
+Map comes from MODEL_ROUTES_JSON env (route id KHÔNG hardcode — resolve động
+từ public API của XQAPI vì route xoay theo giờ):
+  {"deepseek-flash": {"strategy": "auto", "failover": "auto"},
+   "glm-5.3-flash": {"strategy": "auto", "failover": false}}
+Mỗi entry có thể thêm "route" tĩnh làm fallback khi API chết và chưa có cache.
 
-Run:  python3 inject.py  (env PORT, UPSTREAM, MODEL_ROUTES_JSON)
+Run:  python3 inject.py  (env PORT, UPSTREAM, MODEL_ROUTES_JSON, ROUTE_TTL_S)
 """
 import json
 import os
@@ -29,6 +31,10 @@ except json.JSONDecodeError as e:
 
 _UP = urlparse(UPSTREAM)
 _UP_HOST = _UP.hostname or "xqapi.com"
+ROUTE_TTL_S = int(os.environ.get("ROUTE_TTL_S", "300"))
+
+# Cache route động: model -> (listed_at_epoch, [(ratio, latency, routeId, name)])
+_ROUTE_CACHE = {}
 
 # Khung GIẢM GIÁ 50% (giờ VN, UTC+7): failover BẬT. Ngoài khung → khóa cứng.
 # Discount = T2-T6: 07:00-08:00, 11:00-13:00, 17:00-07:00(hôm sau); T7+CN: cả ngày.
@@ -69,6 +75,48 @@ def read_body(handler):
     return b""
 
 
+def fetch_model_routes(model):
+    """GET public route list của model từ XQAPI. Trả [(ratio, lat, routeId, name)]."""
+    from urllib.parse import quote
+    conn = HTTPSConnection(_UP_HOST, _UP.port or 443, timeout=10)
+    conn.request("GET", f"/api/public/models/{quote(model, safe='')}",
+                 headers={"Host": _UP_HOST, "Accept": "application/json"})
+    resp = conn.getresponse()
+    data = json.loads(resp.read().decode())
+    conn.close()
+    out = []
+    for r in data.get("routes", []):
+        if r.get("available") is not True:
+            continue
+        healthy = 0 if r.get("healthStatus") == "healthy" else 1
+        out.append((healthy,
+                    r.get("officialPriceRatio", 999),
+                    r.get("averageLatencyMs", 999999),
+                    r.get("routeId"), r.get("name")))
+    out.sort(key=lambda t: (t[0], t[1], t[2]))
+    return [(t[3], t[4]) for t in out]  # [(routeId, name)] rẻ + khỏe trước
+
+
+def resolve_route(model, cfg):
+    """Route rẻ nhất còn sống cho model. Trả (routeId, name) hoặc (None, None)."""
+    import time
+    now = time.time()
+    hit = _ROUTE_CACHE.get(model)
+    if hit and now - hit[0] < ROUTE_TTL_S:
+        routes = hit[1]
+    else:
+        try:
+            routes = fetch_model_routes(model)
+            _ROUTE_CACHE[model] = (now, routes)
+        except Exception as e:
+            print(f"ROUTE FETCH ERR {model}: {e}", flush=True)
+            routes = hit[1] if hit else []
+    if routes:
+        return routes[0]
+    static = cfg.get("route")  # fallback tĩnh khi API chết + chưa có cache
+    return (static, "static-fallback") if static else (None, None)
+
+
 def maybe_inject(body):
     """Hard-lock mapped models to their XQAPI route. Proxy ALWAYS wins over
     client-sent routing. Returns (new_body, route_id, block_error):
@@ -87,14 +135,18 @@ def maybe_inject(body):
     route = MODEL_ROUTES.get(data["model"])
     if not route:
         return None, None, f"No locked route configured for model: {data['model']}"
+    route_id, route_name = resolve_route(data["model"], route)
+    if not route_id:
+        return None, None, f"No live route for model: {data['model']}"
     failover = route.get("failover", True)
     if failover == "auto":
         failover = is_discount()  # chỉ fallback trong khung giảm giá
     # Proxy luôn overwrite routing của client.
     data["routing"] = {"failover": bool(failover),
-                       "route": route["route"],
+                       "route": route_id,
                        "strategy": route.get("strategy", "auto")}
-    return json.dumps(data, separators=(",", ":")).encode(), route["route"], None
+    return json.dumps(data, separators=(",", ":")).encode(), \
+        f"{route_id} ({route_name})", None
 
 
 class Handler(BaseHTTPRequestHandler):
