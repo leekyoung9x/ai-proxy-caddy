@@ -182,10 +182,12 @@ class Handler(BaseHTTPRequestHandler):
         resp, conn = self._forward(body)
         if resp is None or conn is None:  # upstream unreachable
             return
-        # Route chết (502/503/504) → xóa cache, resolve lại, khác route cũ
-        # thì retry 1 lần với route mới; giống route cũ → trả chết để
-        # 9Router điều sang model khác.
-        if resp.status in (502, 503, 504) and injected:
+        # Route chết (502/503/504) → xóa cache, resolve lại:
+        #  - khác route cũ → retry 1 lần với route mới;
+        #  - giống route cũ (hoặc đã auto) → entry auto thì rớt xuống
+        #    upstream-auto retry 1 lần cuối; entry false cứng → trả chết
+        #    để 9Router điều sang model khác.
+        if resp.status in (502, 503, 504) and injected and injected["id"] != "auto":
             try:
                 model = json.loads(orig).get("model", "")
             except Exception:
@@ -194,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
                 old_id = injected["id"]
                 _ROUTE_CACHE.pop(model, None)
                 body2, info2, err2 = maybe_inject(orig)
-                if not err2 and info2 and info2["id"] != old_id:
+                if not err2 and info2 and info2["id"] not in (old_id, "auto"):
                     print(f"RETRY {model}: {old_id} -> {info2['id']} "
                           f"({info2['name']})", flush=True)
                     try:
@@ -206,39 +208,28 @@ class Handler(BaseHTTPRequestHandler):
                     if resp is None or conn is None:
                         return
                     body, injected = body2, info2
-                else:
-                    # Giống route cũ: nếu entry là auto + giờ đã vào khung
-                    # giảm giá + lần đầu bị khóa → mở failover retry 1 lần
-                    # cuối; còn lại trả chết để 9Router điều model khác.
-                    cfg_fo = MODEL_ROUTES.get(model, {}).get("failover", True)
-                    used_fo = None
+                cfg_fo = MODEL_ROUTES.get(model, {}).get("failover", True)
+                if resp.status in (502, 503, 504) and cfg_fo == "auto":
+                    print(f"RETRY-AUTO {model}: pinned dead, "
+                          f"upstream-auto last try", flush=True)
                     try:
-                        used_fo = json.loads(body).get("routing", {}).get("failover")
+                        d3 = json.loads(orig)
+                        d3.pop("routing", None)
+                        body3 = json.dumps(d3, separators=(",", ":")).encode()
                     except Exception:
-                        pass
-                    if cfg_fo == "auto" and used_fo is False and is_discount():
-                        print(f"RETRY-FO {model}: locked before, "
-                              f"discount window now -> failover=true", flush=True)
+                        body3 = None
+                    if body3:
                         try:
-                            d3 = json.loads(orig)
-                            d3["routing"] = dict(d3.get("routing", {}))
-                            d3["routing"]["failover"] = True
-                            body3 = json.dumps(d3, separators=(",", ":")).encode()
+                            resp.read()
                         except Exception:
-                            body3 = None
-                        if body3:
-                            try:
-                                resp.read()
-                            except Exception:
-                                pass
-                            conn.close()
-                            resp, conn = self._forward(body3)
-                            if resp is None or conn is None:
-                                return
-                            body = body3
-                    if resp.status in (502, 503, 504):
-                        print(f"DEAD {model}: route {old_id} unchanged, "
-                              f"returning {resp.status}", flush=True)
+                            pass
+                        conn.close()
+                        resp, conn = self._forward(body3)
+                        if resp is None or conn is None:
+                            return
+                        body = body3
+                if resp.status in (502, 503, 504):
+                    print(f"DEAD {model}: returning {resp.status}", flush=True)
         self._relay(resp, conn, body, injected)
 
     def _forward(self, body):
