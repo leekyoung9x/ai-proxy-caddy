@@ -135,6 +135,11 @@ def maybe_inject(body):
     route = MODEL_ROUTES.get(data["model"])
     if not route:
         return None, None, f"No locked route configured for model: {data['model']}"
+    if route.get("pin", True) is False:
+        # Tạm mở auto: xóa routing (kể cả của client), để upstream tự chọn.
+        data.pop("routing", None)
+        return json.dumps(data, separators=(",", ":")).encode(), \
+            {"id": "auto", "name": "upstream-auto"}, None
     route_id, route_name = resolve_route(data["model"], route)
     if not route_id:
         return None, None, f"No live route for model: {data['model']}"
