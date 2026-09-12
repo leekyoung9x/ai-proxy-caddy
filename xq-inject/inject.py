@@ -135,8 +135,9 @@ def maybe_inject(body):
     route = MODEL_ROUTES.get(data["model"])
     if not route:
         return None, None, f"No locked route configured for model: {data['model']}"
-    if route.get("pin", True) is False:
-        # Tạm mở auto: xóa routing (kể cả của client), để upstream tự chọn.
+    if route.get("pin", True) is False and is_discount():
+        # Tạm mở auto NHƯNG chỉ trong khung giảm giá: xóa routing
+        # (kể cả của client), để upstream tự chọn.
         data.pop("routing", None)
         return json.dumps(data, separators=(",", ":")).encode(), \
             {"id": "auto", "name": "upstream-auto"}, None
@@ -209,7 +210,8 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     body, injected = body2, info2
                 cfg_fo = MODEL_ROUTES.get(model, {}).get("failover", True)
-                if resp.status in (502, 503, 504) and cfg_fo == "auto":
+                if resp.status in (502, 503, 504) and cfg_fo == "auto" \
+                        and is_discount():
                     print(f"RETRY-AUTO {model}: pinned dead, "
                           f"upstream-auto last try", flush=True)
                     try:
