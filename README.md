@@ -157,6 +157,7 @@ Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
 | `deepseek-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | `pin:false` tạm mở auto (temp 680 chết) |
 | `glm-5.3-flash` | `false` = khóa cứng mọi khung giờ | động (temp 1%) |
 | `kimi-k3` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%, duy nhất 1 route) |
+| `deepseek-v4.1-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%) |
 
 \*Route resolve động theo giờ, coi log `FINAL model=... routing={...}` để biết
 route đang dùng.
