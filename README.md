@@ -136,9 +136,12 @@ Route id xoay theo giờ nên **không hardcode** — injector GET
 
 Route chết giữa chừng (502/503/504) → xóa cache, resolve lại ngay:
 khác route cũ thì retry 1 lần với route mới rồi trả tiếp; giống route cũ
-→ entry `auto` thì rớt xuống upstream-auto (xóa `routing`) retry 1 lần
-cuối (log `RETRY-AUTO`), còn lại (khóa `false` cứng) → trả chết để
-9Router điều sang model khác (log `DEAD`).
+→ entry `auto` **và đang trong khung giảm giá** thì rớt xuống upstream-auto
+(xóa `routing`) retry 1 lần cuối (log `RETRY-AUTO`); còn lại (khóa `false`
+cứng, hoặc ngoài khung) → trả chết để 9Router điều sang model khác (log `DEAD`).
+
+`pin:false` (tạm mở auto) cũng chỉ có tác dụng **trong khung giảm giá**;
+ngoài khung vẫn pin + khóa như thường.
 
 Luật chèn (fail closed):
 - Model có trong map → proxy **luôn overwrite** `routing` của client
@@ -153,6 +156,7 @@ Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
 | `deepseek-v4-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%) |
 | `deepseek-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | `pin:false` tạm mở auto (temp 680 chết) |
 | `glm-5.3-flash` | `false` = khóa cứng mọi khung giờ | động (temp 1%) |
+| `kimi-k3` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%, duy nhất 1 route) |
 
 \*Route resolve động theo giờ, coi log `FINAL model=... routing={...}` để biết
 route đang dùng.
