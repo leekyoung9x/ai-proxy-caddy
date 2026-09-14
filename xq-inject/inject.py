@@ -90,8 +90,8 @@ def fetch_model_routes(model):
             continue
         healthy = 0 if r.get("healthStatus") == "healthy" else 1
         out.append((healthy,
-                    r.get("officialPriceRatio", 999),
-                    r.get("averageLatencyMs", 999999),
+                    r.get("officialPriceRatio") or 999,
+                    r.get("averageLatencyMs") or 999999,
                     r.get("routeId"), r.get("name")))
     out.sort(key=lambda t: (t[0], t[1], t[2]))
     return [(t[3], t[4]) for t in out]  # [(routeId, name)] rẻ + khỏe trước
