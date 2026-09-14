@@ -37,7 +37,7 @@ services:
     environment:
       PORT: "8091"
       UPSTREAM: "https://xqapi.com"
-      MODEL_ROUTES_JSON: '{"deepseek-v4-flash":{"strategy":"auto","failover":"auto"},"deepseek-flash":{"strategy":"auto","failover":"auto","pin":false},"glm-5.3-flash":{"strategy":"auto","failover":false},"kimi-k3":{"strategy":"auto","failover":"auto"},"deepseek-v4.1-flash":{"strategy":"auto","failover":"auto"},"gpt-image-2.5-sunburst":{"strategy":"auto","failover":"auto"},"grok-4.6":{"strategy":"auto","failover":"auto"}}'
+      MODEL_ROUTES_JSON: '{"deepseek-v4-flash":{"strategy":"auto","failover":"auto"},"deepseek-flash":{"strategy":"auto","failover":"auto","pin":false},"glm-5.3-flash":{"strategy":"auto","failover":false},"kimi-k3":{"strategy":"auto","failover":"auto"},"deepseek-v4.1-flash":{"strategy":"auto","failover":"auto"},"gpt-image-2.5-sunburst":{"strategy":"auto","failover":"auto"},"grok-4.6":{"strategy":"auto","failover":"auto"},"gpt-5-6-luna":{"strategy":"auto","failover":"auto"}}'
     volumes:
       - ./xq-inject/inject.py:/app/inject.py:ro
     logging:

@@ -160,6 +160,7 @@ Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):
 | `deepseek-v4.1-flash` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (temp 1%) |
 | `gpt-image-2.5-sunburst` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (duy nhất route-650 生图特惠) |
 | `grok-4.6` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (rẻ nhất: 641 Gork特惠 4%) |
+| `gpt-5-6-luna` | `auto` = chỉ fallback trong khung giảm giá, còn lại khóa cứng | động (duy nhất route-696 temp) |
 
 \*Route resolve động theo giờ, coi log `FINAL model=... routing={...}` để biết
 route đang dùng.
