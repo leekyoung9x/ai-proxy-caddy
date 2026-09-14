@@ -143,10 +143,9 @@ cứng, hoặc ngoài khung) → trả chết để 9Router điều sang model k
 `pin:false` (tạm mở auto) cũng chỉ có tác dụng **trong khung giảm giá**;
 ngoài khung vẫn pin + khóa như thường.
 
-Luật chèn (fail closed):
-- Model có trong map → proxy **luôn overwrite** `routing` của client
-  (client gửi gì cũng thua).
-- Model không có trong map → trả `400`, **không forward** lên XQAPI.
+Luật chèn:
+- Model có trong map → proxy **luôn overwrite** `routing` của client.
+- Model lạ (chưa map) → cho qua thẳng, không chặn không quản.
 - Body không phải JSON chat (GET, không có field `model`) → pass-through nguyên.
 
 Map hiện tại (`MODEL_ROUTES_JSON` trong `docker-compose.yml`):

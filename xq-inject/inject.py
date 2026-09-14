@@ -120,8 +120,10 @@ def resolve_route(model, cfg):
 def maybe_inject(body):
     """Hard-lock mapped models to their XQAPI route. Proxy ALWAYS wins over
     client-sent routing. Returns (new_body, route_id, block_error):
-      - (body, None, None): passthrough (no body / not JSON / no model field)
-      - (None, None, err): FAIL CLOSED, unknown model, do not forward
+      - (body, None, None): passthrough (no body / not JSON / no model field
+        / model chưa map — cho qua thẳng, không chặn)
+      - (None, None, err): FAIL CLOSED khi resolve route thất bại cho model
+        ĐÃ map (API chết + không cache + không route tĩnh)
       - (new_body, route, None): routing overwritten with locked values
     """
     if not body:
@@ -134,7 +136,7 @@ def maybe_inject(body):
         return body, None, None
     route = MODEL_ROUTES.get(data["model"])
     if not route:
-        return None, None, f"No locked route configured for model: {data['model']}"
+        return body, None, None  # model lạ: passthrough, không quản
     if route.get("pin", True) is False and is_discount():
         # Tạm mở auto NHƯNG chỉ trong khung giảm giá: xóa routing
         # (kể cả của client), để upstream tự chọn.
