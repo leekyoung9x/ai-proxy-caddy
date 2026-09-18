@@ -59,8 +59,20 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 - Response là SSE streaming passthrough với client xin stream; client non-stream
   nhận JSON chuẩn (`chat.completion` cho /chat/completions,
   `response` object cho /responses).
-- 9Router node "OpenCode Zen" prefix `oc` trỏ về base URL này
-  (`http://opencode-proxy:8089/v1`, key `public`).
+- Model chỉ chạy trên `/responses` (mặc định `muse-spark-1.3-contributor-free`,
+  env `REDIRECT_MODELS`) được shim convert từ chat → Responses và trả ngược
+  shape `chat.completion`:
+  - user message → `input_text`
+  - assistant message → `output_text` (bắt buộc, sai type → upstream 400
+    `content type input_text is not valid on assistant messages`)
+  - system/developer → gộp vào `instructions`
+  - text gom từ SSE delta, không nhân đôi với `response.completed`
+- 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
+  (`http://opencode-proxy:8089/v1`, key `public`). KHÔNG dùng prefix `oc`:
+  9Router có builtin provider `opencode` alias `oc` (gọi thẳng
+  `https://opencode.ai/zen/v1`) nên prefix `oc` bị builtin chiếm, bypass shim
+  → 403 FreeTierError. Combo tương ứng: `oczen/muse-spark-1.3-contributor-free`.
+- Test từ host: 9Router nằm ở `127.0.0.1:20127` (20128 là omniroute).
 
 ### :8088 → OpenRouter (`https://openrouter.ai`)
 
