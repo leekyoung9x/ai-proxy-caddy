@@ -187,6 +187,8 @@ def messages_to_input(data, client_tool_names=None):
     """
     inp = []
     instructions_parts = []
+    recent_tool_pairs = []
+    pending_tool_calls = {}
     for m in data.get("messages") or []:
         if not isinstance(m, dict):
             continue
@@ -207,16 +209,23 @@ def messages_to_input(data, client_tool_names=None):
         if role == "assistant":
             for tc in m.get("tool_calls") or []:
                 fn = tc.get("function") or {}
+                call_id = tc.get("id") or gen_id("call")
+                call_name = _client_tool_name(fn.get("name", ""), client_tool_names)
+                call_args = fn.get("arguments", "{}")
+                pending_tool_calls[call_id] = (call_name, call_args)
                 inp.append({"type": "function_call",
-                            "call_id": tc.get("id") or gen_id("call"),
-                            "name": _client_tool_name(fn.get("name", ""), client_tool_names),
-                            "arguments": fn.get("arguments", "{}")})
+                            "call_id": call_id,
+                            "name": call_name,
+                            "arguments": call_args})
             if texts:
                 inp.append({"type": "message", "role": "assistant",
                             "content": [{"type": "output_text", "text": t} for t in texts]})
             continue
         if role == "tool":
             tool_output = content if isinstance(content, str) else json.dumps(content)
+            prior_call = pending_tool_calls.get(m.get("tool_call_id"))
+            if prior_call:
+                recent_tool_pairs.append((prior_call[0], prior_call[1], tool_output))
             inp.append({"type": "function_call_output",
                         "call_id": m.get("tool_call_id", ""),
                         "output": tool_output})
@@ -237,6 +246,21 @@ def messages_to_input(data, client_tool_names=None):
             continue
         inp.append({"type": "message", "role": "user",
                     "content": [{"type": "input_text", "text": t} for t in texts]})
+    if recent_tool_pairs:
+        seen = set()
+        for name, args, result in reversed(recent_tool_pairs):
+            key = (name, args, result)
+            if key in seen:
+                continue
+            seen.add(key)
+            if len([x for x in recent_tool_pairs if x == key]) >= 3:
+                inp.append({"type": "message", "role": "user", "content": [{
+                    "type": "input_text",
+                    "text": (f"The tool `{name}` has already returned the same result "
+                             "for identical arguments repeatedly. Do not call it again "
+                             "with those arguments. Stop and report the blocker.")
+                }]})
+                break
     out = {"model": data.get("model"),
            "input": inp,
            "stream": True,

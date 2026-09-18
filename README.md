@@ -101,6 +101,9 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   - Khi Hermes guardrail đã chặn một tool call lặp, shim thêm một message
     user-level vào Responses input yêu cầu Muse dừng tool và giải thích blocker;
     không để Muse đọc blocker như output bình thường rồi phát lại y nguyên call.
+    Đồng thời phát hiện chuỗi `(tool name, arguments, result)` lặp ≥3 lần trong
+    history và chèn cảnh báo ngay cả khi marker guardrail không còn nguyên văn
+    (ví dụ app chỉ lưu preview/result stub).
   - Freebuff adapter có `GET /v1/models`; model list được công bố để 9Router
     không báo lỗi `501 Error fetching models`.
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
