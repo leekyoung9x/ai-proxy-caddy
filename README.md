@@ -70,6 +70,10 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   - client `stream:true` nhận lại đúng `chat.completion.chunk` SSE và `data: [DONE]`;
     không passthrough event Responses nguyên bản (`response.output_text.delta`),
     vì 9Router sẽ coi stream đó là rỗng
+  - `max_output_tokens` được nâng sàn 16384: Responses tính cả reasoning vào
+    output budget, `max_tokens` nhỏ của Chat Completions tạo
+    `response.incomplete (max_output_tokens)` → stream không có text nào →
+    "Provider returned an empty response stream"
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
   (`http://opencode-proxy:8089/v1`, key `public`). KHÔNG dùng prefix `oc`:
   9Router có builtin provider `opencode` alias `oc` (gọi thẳng
