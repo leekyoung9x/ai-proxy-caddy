@@ -40,7 +40,7 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 |---|---|
 | `Caddyfile` | Proxy localhost: `:8089` (opencode), `:8088` (openrouter), `:8087` (xqapi raw) |
 | `xq-inject/inject.py` | Chèn `routing` (route lock) vào JSON body cho XQAPI theo MODEL, stream SSE passthrough |
-| `docker-compose.yml` | Chạy 2 container (`opencode-proxy` caddy + `xq-inject`), join network `root_poki-net` (external) |
+| `docker-compose.yml` | 3 container (`opencode-proxy` caddy + `xq-inject` + `oc-inject`), join network `root_poki-net` (external) |
 | `.gitignore` | Bỏ qua data/volumes local |
 
 ## Cấu hình chi tiết
