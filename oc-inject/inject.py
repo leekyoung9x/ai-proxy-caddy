@@ -216,9 +216,24 @@ def messages_to_input(data, client_tool_names=None):
                             "content": [{"type": "output_text", "text": t} for t in texts]})
             continue
         if role == "tool":
+            tool_output = content if isinstance(content, str) else json.dumps(content)
             inp.append({"type": "function_call_output",
                         "call_id": m.get("tool_call_id", ""),
-                        "output": content if isinstance(content, str) else json.dumps(content)})
+                        "output": tool_output})
+            # Hermes guardrails inject a deterministic blocker result after
+            # repeated identical calls. Muse otherwise ignores that tool
+            # result and emits the same call again. Add a user-level stop
+            # instruction only for this known guardrail marker.
+            if any(marker in tool_output for marker in (
+                    "identical_call_streak_halt",
+                    "repeated_exact_failure_block",
+                    "same_tool_failure_halt")):
+                inp.append({"type": "message", "role": "user", "content": [{
+                    "type": "input_text",
+                    "text": ("Tool guardrail blocked the repeated call. "
+                             "Do not call that tool or repeat its arguments. "
+                             "Stop the operation and explain the blocker to the user.")
+                }]})
             continue
         inp.append({"type": "message", "role": "user",
                     "content": [{"type": "input_text", "text": t} for t in texts]})

@@ -98,6 +98,9 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
     name upstream (`bash`) đổi thành tool client thật (`terminal`) trước khi
     gửi `function_call` lên Responses, để Muse không tưởng client vẫn có
     `bash` rồi gọi tiếp `bash` vô hạn (identical_call_streak_halt).
+  - Khi Hermes guardrail đã chặn một tool call lặp, shim thêm một message
+    user-level vào Responses input yêu cầu Muse dừng tool và giải thích blocker;
+    không để Muse đọc blocker như output bình thường rồi phát lại y nguyên call.
   - Freebuff adapter có `GET /v1/models`; model list được công bố để 9Router
     không báo lỗi `501 Error fetching models`.
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
