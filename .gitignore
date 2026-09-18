@@ -2,4 +2,5 @@ data-*/
 logs-*/
 *.log
 .env
+.env.local
 __pycache__/

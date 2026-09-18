@@ -81,7 +81,29 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   → 403 FreeTierError. Combo tương ứng: `oczen/muse-spark-1.3-contributor-free`.
 - Test từ host: 9Router nằm ở `127.0.0.1:20127` (20128 là omniroute).
 
-### :8088 → OpenRouter (`https://openrouter.ai`)
+### :8086 → Freebuff/Codebuff
+
+Adapter nội bộ tại `freebuff-inject:8093` thực hiện đúng flow của Freebuff:
+`session/admission` → `agent-runs` (`START`) → `/chat/completions` với
+`codebuff_metadata`. Model/agent map hiện hỗ trợ:
+
+```text
+deepseek/deepseek-v4-flash       → base2-free-deepseek-flash
+deepseek/deepseek-v4-pro         → base2-free-deepseek
+mimo/mimo-v2.5                    → base2-free-mimo
+minimax/minimax-m3               → base2-free-minimax-m3
+openai/gpt-5.6-luna              → base2-free-luna
+z-ai/glm-5.3-flash-2026-09-05    → base2-free-glm
+```
+
+Endpoint cho 9Router: `http://opencode-proxy:8086/v1`. Adapter tự thêm system
+prompt Buffy nếu request chưa có system message và ép upstream `stream:true`.
+Token không nằm trong repo/log: đặt `FREEBUFF_TOKEN` và `FREEBUFF_USER_ID` trong
+`.env` của stack. Hiện máy chưa có credentials Freebuff nên mới chỉ verify
+compile, container/network, Caddy route và response 502 rõ ràng khi thiếu token;
+chưa tuyên bố E2E Freebuff pass. Sau khi có token hợp lệ cần test admission,
+agent run và stream thật trước khi bật node 9Router.
+
 
 - Forward nguyên path, chỉ gắn:
   - `Host: openrouter.ai`

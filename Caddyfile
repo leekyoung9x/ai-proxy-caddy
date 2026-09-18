@@ -13,6 +13,12 @@
 	}
 }
 
+:8086 {
+	handle /v1/* {
+		reverse_proxy http://freebuff-inject:8093
+	}
+}
+
 :8087 {
 	reverse_proxy https://xqapi.com {
 		header_up Host xqapi.com

@@ -10,6 +10,7 @@ services:
       - "127.0.0.1:8089:8089"
       - "127.0.0.1:8088:8088"
       - "127.0.0.1:8087:8087"
+      - "127.0.0.1:8086:8086"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - opencode_proxy_data:/data
@@ -38,6 +39,32 @@ services:
     volumes:
       - ./oc-inject/inject.py:/app/inject.py:ro
       - ./oc-inject/aggregate_responses.py:/app/aggregate_responses.py:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - poki-net
+
+  # Freebuff (codebuff) free agent adapter: admission -> agent-runs ->
+  # chat/completions với codebuff_metadata. Token đọc từ env FREEBUFF_TOKEN
+  # (đặt trong .env của host, không lưu trong repo). Caddy :8086 forward vào đây.
+  freebuff-inject:
+    image: python:3.12-alpine
+    container_name: freebuff-inject
+    restart: always
+    command: ["python3", "/app/inject.py"]
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      PORT: "8093"
+      FREEBUFF_URL: "https://www.codebuff.com/api/v1"
+      FREEBUFF_TOKEN: "${FREEBUFF_TOKEN:-}"
+      FREEBUFF_USER_ID: "${FREEBUFF_USER_ID:-}"
+    volumes:
+      - ./freebuff-inject/inject.py:/app/inject.py:ro
     logging:
       driver: json-file
       options:
