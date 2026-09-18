@@ -38,9 +38,13 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 
 | File | Vai trò |
 |---|---|
-| `Caddyfile` | Proxy localhost: `:8089` (opencode), `:8088` (openrouter), `:8087` (xqapi raw) |
+| `Caddyfile` | Proxy localhost: `:8089` (opencode), `:8088` (openrouter), `:8087` (xqapi raw), `:8086` (freebuff), `:8085` (codebuddy) |
 | `xq-inject/inject.py` | Chèn `routing` (route lock) vào JSON body cho XQAPI theo MODEL, stream SSE passthrough |
-| `docker-compose.yml` | 3 container (`opencode-proxy` caddy + `xq-inject` + `oc-inject`), join network `root_poki-net` (external) |
+| `oc-inject/inject.py` | Shim chat → Responses cho OpenCode Zen, gắn 5 tool + header session |
+| `freebuff-inject/inject.py` | Adapter Freebuff: admission → agent-run → chat, tự nhả session lock |
+| `codebuddy-inject/inject.py` | Adapter CodeBuddy: chèn system message, log `usage.credit` |
+| `docker-compose.yml` | 5 container (caddy + `oc-inject` + `xq-inject` + `freebuff-inject` + `codebuddy-inject`), join network `root_poki-net` (external) |
+| `docs/FREE_AI_APIS.md` | Tài liệu reverse-engineer + curl đầy đủ cho cả 4 provider |
 | `.gitignore` | Bỏ qua data/volumes local |
 
 ## Cấu hình chi tiết
@@ -113,28 +117,81 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   → 403 FreeTierError. Combo tương ứng: `oczen/muse-spark-1.3-contributor-free`.
 - Test từ host: 9Router nằm ở `127.0.0.1:20127` (20128 là omniroute).
 
+### :8085 → CodeBuddy / WorkBuddy (Tencent)
+
+Adapter nội bộ tại `codebuddy-inject:8094` gọi thẳng
+`POST https://www.codebuddy.ai/v2/chat/completions`. Khác biệt so với OpenAI
+chuẩn (phát hiện qua trace):
+
+1. Message đầu tiên trong `messages` **phải** là `role: "system"`. Thiếu →
+   `{"code":11128,"msg":"first message is not system prompt"}`. Adapter tự chèn
+   nếu client không gửi.
+2. Header `X-User-Id` bắt buộc, phải khớp accessToken.
+3. Credit tiêu thụ nằm ở `usage.credit` trong event cuối của SSE.
+
+Model free đã verify (`usage.credit = 0`) trên tài khoản hiện tại:
+
+| Model | Credit/req | Ghi chú |
+|---|---|---|
+| `hy3` | **0** | Hunyuan 3 Thinking — reasoning model |
+| `deepseek-v4.1-flash` | **0** | context 1M, native multimodal |
+| `hy4-preview-f` | **0** | trial 14 ngày (xem cảnh báo dưới) |
+
+`hy3` trả 2 field: `reasoning_content` (suy luận) và `content` (đáp án cuối).
+
+⚠️ `hy4-preview-f` **không** được đưa vào `GET /v1/models`: backend chỉ chấp
+nhận ID này trong 14 ngày kể từ lần dùng đầu (`hy4.first_user_time` trong
+`local_storage` của CLI). Sau đó tính như `hy4-preview` thường (0.29 credit).
+Vẫn gọi được qua adapter (trong `TRIAL_MODELS`) nhưng cố ý không công bố, tránh
+9Router hiện model ảo rồi 403.
+
+Không phải model nào cũng có bản free: `hy4-preview` = 0.29,
+`deepseek-v4.1-flash-sg` = 0.03, `glm-5.3` = 0.79. Suffix `-f` không phải cơ
+chế chung — quét cả 21 model × `-f`, chỉ `hy4-preview-f` tồn tại.
+
+Endpoint cho 9Router: `http://opencode-proxy:8085/v1`. Token lấy bằng device
+flow (`POST /v2/plugin/auth/state` → mở `authUrl` → `GET
+/v2/plugin/auth/token?state=...`), `expiresIn` ≈ 365 ngày nên không cần refresh.
+Đặt `CODEBUDDY_TOKEN` + `CODEBUDDY_USER_ID` trong `.env` của stack.
+
 ### :8086 → Freebuff/Codebuff
 
 Adapter nội bộ tại `freebuff-inject:8093` thực hiện đúng flow của Freebuff:
 `session/admission` → `agent-runs` (`START`) → `/chat/completions` với
-`codebuff_metadata`. Model/agent map: **chỉ công bố model đã verify sống** trên tài khoản hiện tại.
-Các combo khác từ tài liệu (`v4-pro`, `mimo`, `minimax`, `luna`, `glm`) đều bị
-Freebuff từ chối (`session_model_mismatch`, `model_locked`,
-`free_mode_legacy_luna_agent`, `free_mode_invalid_agent_model`) — không đưa vào
-`/v1/models` để tránh 9Router hiện model ảo rồi 403:
+`codebuff_metadata`.
 
-```text
-deepseek/deepseek-v4-flash → base2-free-deepseek-flash
-```
+**Freebuff KHÔNG có model giá 0.** Tài khoản free được cấp pool **25
+Freebucks/ngày** (reset 00:00 giờ Saigon = 17:00 UTC), mỗi model trừ theo
+giá/giờ. Danh sách model được phép ở tier `limited` do server tự công bố trong
+lỗi 409 `session_model_mismatch`:
+
+> "Limited free access is only available with GLM 5.3 Flash or DeepSeek V4.1
+> Flash or MiMo 2.5 or Solar Pro 4."
+
+| Model | Agent | Freebucks/giờ |
+|---|---|---|
+| `z-ai/glm-5.3-flash` | `base2-free-glm-5-3-flash` | 5 |
+| `mimo/mimo-v2.5` | `base2-free-mimo` | 10 |
+| `upstage/solar-pro4` | `base2-free-solar-pro4` | 10 |
+| `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | 15 (off-peak 10) |
+
+Đã verify sống: `z-ai/glm-5.3-flash` → HTTP 200 trả text thật. 3 model còn lại
+server tuyên bố free nhưng bị chặn bởi quota ngày lúc verify (429
+`rate_limited`) — không phải model lock.
+
+Các model khác trong bảng giá (`gpt-5.6-luna` 20, `gemini-3.8-flash` 50,
+`kimi-k3-eco` 5, `muse-spark-*` 15) chỉ mở cho tier trả phí — gọi vào bị `409
+session_model_mismatch`, nên KHÔNG đưa vào `/v1/models`.
+
+Bẫy: session cũ giữ slot model khác → `409 model_locked`. Adapter tự gọi
+`GET /freebuff/session` lấy `instanceId` rồi `DELETE` để nhả slot trước khi xin
+admission model mới.
 
 Endpoint cho 9Router: `http://opencode-proxy:8086/v1`. Adapter tự thêm system
 prompt Buffy nếu request chưa có system message và ép upstream `stream:true`.
-Token không nằm trong repo/log: đặt `FREEBUFF_TOKEN` và `FREEBUFF_USER_ID` trong
-`.env` của stack. Hiện máy chưa có credentials Freebuff nên mới chỉ verify
-compile, container/network, Caddy route và response 502 rõ ràng khi thiếu token;
-chưa tuyên bố E2E Freebuff pass. Sau khi có token hợp lệ cần test admission,
-agent run và stream thật trước khi bật node 9Router.
-
+Thêm 2 endpoint tiện dụng: `GET /v1/models` (kèm `freebucks_per_hour`) và
+`GET /v1/freebucks` (xem `daily.remaining`). Token đặt `FREEBUFF_TOKEN` +
+`FREEBUFF_USER_ID` trong `.env` của stack — không commit.
 
 - Forward nguyên path, chỉ gắn:
   - `Host: openrouter.ai`
@@ -188,6 +245,8 @@ tên service, **không** dùng `127.0.0.1` (nó sẽ trỏ vào chính container
 - OpenCode Zen channel base URL: `http://opencode-proxy:8089/v1`
 - OpenRouter channel base URL: `http://opencode-proxy:8088/api/v1`
 - XQAPI base URL: `http://opencode-proxy:8087` (giữ nguyên path upstream)
+- Freebuff channel base URL: `http://opencode-proxy:8086/v1`
+- CodeBuddy channel base URL: `http://opencode-proxy:8085/v1`
 
 ## XQAPI local: xq-inject map MODEL → route (không domain)
 
@@ -288,6 +347,21 @@ Thêm model mới (ví dụ `qwen-flash` → route-999). Checklist:
    error" không nguồn gốc, log 9Router trống.
 8. **Khác Docker network** → container không resolve được tên service. Kiểm tra
    bằng `docker network inspect <net>` và cho container cần gọi join cùng net.
+9. **CodeBuddy `{"code":11128,"msg":"first message is not system prompt"}`** →
+   message đầu tiên trong `messages` phải là `role: "system"`. Client
+   OpenAI-compatible thường không gửi → `codebuddy-inject` chèn tự động
+   (`CODEBUDDY_SYSTEM`, mặc định `"You are CodeBuddy Code."`).
+10. **CodeBuddy trả `content` rỗng** → không phải lỗi. `hy3` là reasoning model,
+    chữ nằm trong `reasoning_content` (SSE delta), `content` chỉ có đáp án cuối.
+11. **Freebuff `409 model_locked`** → Freebuff chỉ cho 1 session active. Đang giữ
+    session model khác thì phải `GET /freebuff/session` lấy `instanceId` rồi
+    `DELETE /freebuff/session` kèm header `x-freebuff-instance-id` trước khi xin
+    admission model mới. `freebuff-inject` tự làm.
+12. **Freebuff `409 session_model_mismatch`** → model không thuộc 4 model tier
+    `limited` (`glm-5.3-flash`, `deepseek-v4-flash`, `mimo-v2.5`, `solar-pro4`).
+    Đừng thêm model khác vào `/v1/models` — client sẽ thấy model ảo rồi 409.
+13. **Freebuff `429 rate_limited`** → hết 25 Freebucks/ngày, không phải model
+    lock. Xem `GET /v1/freebucks` → `daily.resetAt` (17:00 UTC = 00:00 giờ VN).
 
 ## License
 

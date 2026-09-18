@@ -19,6 +19,12 @@
 	}
 }
 
+:8085 {
+	handle /v1/* {
+		reverse_proxy http://codebuddy-inject:8094
+	}
+}
+
 :8087 {
 	reverse_proxy https://xqapi.com {
 		header_up Host xqapi.com

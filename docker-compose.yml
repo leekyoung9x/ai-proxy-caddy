@@ -11,6 +11,7 @@ services:
       - "127.0.0.1:8088:8088"
       - "127.0.0.1:8087:8087"
       - "127.0.0.1:8086:8086"
+      - "127.0.0.1:8085:8085"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - opencode_proxy_data:/data
@@ -91,6 +92,35 @@ services:
       MODEL_ROUTES_JSON: '{"deepseek-v4-flash":{"strategy":"auto","failover":"auto"},"deepseek-flash":{"strategy":"auto","failover":"auto","pin":false},"glm-5.3-flash":{"strategy":"auto","failover":false},"kimi-k3":{"strategy":"auto","failover":"auto"},"deepseek-v4.1-flash":{"strategy":"auto","failover":"auto"},"gpt-image-2.5-sunburst":{"strategy":"auto","failover":"auto"},"grok-4.6":{"strategy":"auto","failover":"auto"},"gpt-5-6-luna":{"strategy":"auto","failover":"auto"}}'
     volumes:
       - ./xq-inject/inject.py:/app/inject.py:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - poki-net
+
+  # CodeBuddy / WorkBuddy (Tencent) adapter: chèn system prompt đầu tiên và
+  # header X-User-Id bắt buộc. Token đọc từ env CODEBUDDY_TOKEN.
+  # Caddy :8085 forward vào đây. Xem codebuddy-inject/inject.py để biết chi tiết.
+  codebuddy-inject:
+    image: python:3.12-alpine
+    container_name: codebuddy-inject
+    restart: always
+    command: ["python3", "/app/inject.py"]
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      PORT: "8094"
+      UPSTREAM: "https://www.codebuddy.ai"
+      CODEBUDDY_TOKEN: "${CODEBUDDY_TOKEN:-}"
+      CODEBUDDY_USER_ID: "${CODEBUDDY_USER_ID:-}"
+      # Chỉ công bố model free vĩnh viễn. hy4-preview-f là trial 14 ngày,
+      # đừng thêm vào đây tránh 9Router hiện model ảo sau khi hết hạn.
+      CODEBUDDY_MODELS: "${CODEBUDDY_MODELS:-hy3,deepseek-v4.1-flash}"
+    volumes:
+      - ./codebuddy-inject/inject.py:/app/inject.py:ro
     logging:
       driver: json-file
       options:
