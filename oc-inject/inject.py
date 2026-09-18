@@ -218,7 +218,10 @@ def messages_to_input(data):
            "stream": True,          # /responses bắt buộc stream
            "store": False,
            "instructions": "\n".join(instructions_parts),
-           "max_output_tokens": data.get("max_tokens") or 1024}
+           # Responses tính cả reasoning vào output token budget; giữ
+           # max_tokens nhỏ của Chat Completions sẽ tạo response.incomplete
+           # (reason=max_output_tokens) và stream rỗng. Đặt sàn đủ cho muse.
+           "max_output_tokens": max(16384, int(data.get("max_tokens") or 0))}
     return out
 
 
@@ -287,15 +290,11 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
 
 
 def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
-    """Đổi Responses SSE thành OpenAI chat.completion SSE.
-
-    9Router gọi /chat/completions với stream=true, nên không được passthrough
-    event type của Responses (response.output_text.delta): client sẽ coi đó là
-    empty stream dù upstream đã trả 200.
-    """
+    """Translate Responses SSE into OpenAI chat.completion SSE."""
     out = []
     cid = gen_id("chatcmpl")
     created = int(time.time())
+    types = []
     for line in sse.splitlines():
         line = line.strip()
         if not line.startswith("data:"):
@@ -308,18 +307,26 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
         except json.JSONDecodeError:
             continue
         typ = ev.get("type", "")
+        types.append(typ)
         if typ == "response.output_text.delta":
             delta = {"role": "assistant", "content": ev.get("delta", "")}
             out.append("data: " + json.dumps({
                 "id": cid, "object": "chat.completion.chunk", "created": created,
                 "model": model, "choices": [{"index": 0, "delta": delta,
-                "finish_reason": None}]}, ensure_ascii=False) + "\\n\\n")
+                "finish_reason": None}]}, ensure_ascii=False) + "\n\n")
         elif typ in ("response.completed", "response.done"):
             out.append("data: " + json.dumps({
                 "id": cid, "object": "chat.completion.chunk", "created": created,
                 "model": model, "choices": [{"index": 0, "delta": {},
-                "finish_reason": "stop"}]}) + "\\n\\n")
-    out.append("data: [DONE]\\n\\n")
+                "finish_reason": "stop"}]}) + "\n\n")
+        elif typ == "response.incomplete":
+            info = ev.get("response", ev)
+            print("SSE_INCOMPLETE status=%s incomplete=%s error=%s" % (
+                info.get("status"), info.get("incomplete_details"),
+                info.get("error")), flush=True)
+    print("SSE_TYPES " + ",".join(types) + " raw_bytes=" +
+          str(len(sse.encode())), flush=True)
+    out.append("data: [DONE]\n\n")
     return "".join(out).encode("utf-8")
 
 
