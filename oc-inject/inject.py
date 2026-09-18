@@ -295,6 +295,7 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
     cid = gen_id("chatcmpl")
     created = int(time.time())
     types = []
+    tool_args = []
     for line in sse.splitlines():
         line = line.strip()
         if not line.startswith("data:"):
@@ -314,6 +315,34 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                 "id": cid, "object": "chat.completion.chunk", "created": created,
                 "model": model, "choices": [{"index": 0, "delta": delta,
                 "finish_reason": None}]}, ensure_ascii=False) + "\n\n")
+        elif typ == "response.function_call_arguments.delta":
+            # Responses function-call delta → OpenAI tool_calls delta.
+            item = ev.get("item", {})
+            tool_id = item.get("call_id") or item.get("id") or gen_id("call")
+            tool_name = item.get("name") or ""
+            tool_args.append(ev.get("delta", ""))
+            td = {"index": 0, "id": tool_id, "type": "function",
+                  "function": {"name": tool_name, "arguments": ev.get("delta", "")}}
+            out.append("data: " + json.dumps({
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model, "choices": [{"index": 0,
+                "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
+        elif typ == "response.output_item.added":
+            item = ev.get("item", {})
+            if item.get("type") == "function_call":
+                tool_id = item.get("call_id") or item.get("id") or gen_id("call")
+                tool_name = item.get("name") or ""
+                td = {"index": 0, "id": tool_id, "type": "function",
+                      "function": {"name": tool_name, "arguments": ""}}
+                out.append("data: " + json.dumps({
+                    "id": cid, "object": "chat.completion.chunk", "created": created,
+                    "model": model, "choices": [{"index": 0,
+                    "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
+        elif typ in ("response.function_call_arguments.done",):
+            out.append("data: " + json.dumps({
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model, "choices": [{"index": 0, "delta": {},
+                "finish_reason": "tool_calls"}]}) + "\n\n")
         elif typ in ("response.completed", "response.done"):
             out.append("data: " + json.dumps({
                 "id": cid, "object": "chat.completion.chunk", "created": created,

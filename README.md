@@ -74,6 +74,11 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
     output budget, `max_tokens` nhỏ của Chat Completions tạo
     `response.incomplete (max_output_tokens)` → stream không có text nào →
     "Provider returned an empty response stream"
+  - Tool-call events của Responses (`response.output_item.added`,
+    `response.function_call_arguments.delta/done`) được đổi sang OpenAI
+    `tool_calls`, để 9Router thực thi tool rồi gửi lượt hội thoại tiếp theo.
+  - Freebuff adapter có `GET /v1/models`; model list được công bố để 9Router
+    không báo lỗi `501 Error fetching models`.
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
   (`http://opencode-proxy:8089/v1`, key `public`). KHÔNG dùng prefix `oc`:
   9Router có builtin provider `opencode` alias `oc` (gọi thẳng

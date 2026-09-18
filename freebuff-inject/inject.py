@@ -47,6 +47,14 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     def log_message(self, format, *args):  # noqa: A002
         print(f"{self.command} {self.path} -> {format % args}", flush=True)
+    def do_GET(self):
+        if self.path.rstrip("/") != "/v1/models":
+            self.send_error(404); return
+        models = [{"id": model, "object": "model", "created": 0,
+                   "owned_by": "freebuff"} for model in AGENTS]
+        raw = json.dumps({"object": "list", "data": models}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_POST(self):
         if self.path.rstrip("/") != "/v1/chat/completions":
             self.send_error(404); return
