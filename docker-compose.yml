@@ -22,6 +22,29 @@ services:
     networks:
       - poki-net
 
+  # OpenCode Zen anticheat wrapper: gắn Bearer public + ses_/msg_ id + tools
+  # bắt buộc. Caddy :8089 forward vào đây, service này forward lên opencode.ai.
+  oc-inject:
+    image: python:3.12-alpine
+    container_name: oc-inject
+    restart: always
+    command: ["python3", "/app/inject.py"]
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      PORT: "8092"
+      UPSTREAM: "https://opencode.ai"
+    volumes:
+      - ./oc-inject/inject.py:/app/inject.py:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - poki-net
+
   # XQAPI body injector: chèn routing (route lock) vào JSON body theo MODEL.
   # 9Router gọi thẳng http://xq-inject:8091, không cần domain/path prefix.
   xq-inject:

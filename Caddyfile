@@ -2,11 +2,7 @@
 	handle_path /v1/* {
 		rewrite * /zen/v1{path}
 
-		reverse_proxy https://opencode.ai {
-			header_up Host opencode.ai
-			header_up x-opencode-session "hehe"
-			header_up x-opencode-client "desktop"
-		}
+		reverse_proxy http://oc-inject:8092
 	}
 }
 

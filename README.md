@@ -49,17 +49,14 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 
 - `handle_path /v1/*` + `rewrite * /zen/v1{path}`: client gọi `/v1/chat/completions`,
   upstream nhận `/zen/v1/chat/completions`.
-- `header_up` gắn cứng:
-  - `Host: opencode.ai`
-  - `x-opencode-session: hehe` (free tier bắt buộc session id; 9Router không
-    forward custom header nên gắn tại proxy)
-  - `x-opencode-client: desktop`
-- `Authorization` **pass-through**: client tự gửi `Bearer <key>` của mình,
-  proxy không đè.
-- Base URL cho client: `http://opencode-proxy:8089/v1` (khi chạy cùng Docker
-  network) hoặc `http://127.0.0.1:8089/v1` (khi gọi từ host).
-  ⚠️ Không thêm `/zen` vào base URL — proxy đã tự thêm, thừa sẽ thành
-  `/zen/zen/...` → upstream trả lỗi.
+- `oc-inject` tạo lại header bắt buộc: `Authorization: Bearer public`,
+  `x-opencode-session`/`x-opencode-request` đúng dạng `ses_`/`msg_` + ID,
+  `x-opencode-client: cli`, `x-opencode-project: global`, User-Agent OpenCode 1.18.
+- Body JSON được bổ sung 5 tool OpenCode (`bash`, `edit`, `glob`, `grep`, `read`),
+  ép `stream:true` và `tool_choice:auto` để match handshake free tier.
+- Response là SSE streaming passthrough; client phải hỗ trợ stream.
+- Base URL cho client: `http://opencode-proxy:8089/v1` (Docker) hoặc
+  `http://127.0.0.1:8089/v1` (host).
 
 ### :8088 → OpenRouter (`https://openrouter.ai`)
 
