@@ -75,7 +75,10 @@ Hoặc đơn giản hơn: cài CLI rồi `/login`, token nằm ở
 
 ```bash
 export CB_TOKEN=$(python3 -c "import json;print(json.load(open('$HOME/.codebuddy/auth_token.json'))['accessToken'])")
-export CB_UID='<X-User-Id của bạn>'   # GET /v2/plugin/account để biết
+# X-User-Id: KHÔNG bắt buộc cho /v2/chat/completions (đã test thiếu/rỗng/sai UUID
+# đều HTTP 200). Chỉ cần nếu bạn muốn khớp hành vi CLI gốc.
+export CB_UID=$(curl -s 'https://www.codebuddy.ai/v2/plugin/account' \
+  -H "Authorization: Bearer $CB_TOKEN" | python3 -c "import json,sys;print(json.load(sys.stdin)['data']['uid'])")
 ```
 
 ### 1.2 Liệt kê model + giá credit
@@ -102,7 +105,6 @@ for m in d['data']['models']:
 # hy3 (Hunyuan 3 Thinking) — 0 credit
 curl -N -X POST 'https://www.codebuddy.ai/v2/chat/completions' \
   -H "Authorization: Bearer $CB_TOKEN" \
-  -H "X-User-Id: $CB_UID" \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
   -d '{
@@ -120,6 +122,11 @@ một endpoint, cùng header.
 
 **Bắt buộc**: message đầu tiên trong `messages` phải là `role: "system"`.
 Thiếu → `{"code":11128,"msg":"first message is not system prompt"}`.
+
+**KHÔNG bắt buộc**: header `X-User-Id`. Đã test 4 trường hợp (thiếu / rỗng / sai
+UUID / đúng UUID) — tất cả đều HTTP 200 và `credit=0`. Chỉ `Authorization` mới
+cần. (`GET /v3/config` thì ngược lại: cần `User-Agent: CLI/<ver> CodeBuddy/<ver>`
++ `X-Product` + `X-Domain`, thiếu → `{"code":12403,"msg":"check ua..."}`.)
 
 **Đọc kết quả**: `hy3` là reasoning model nên có 2 field:
 - `reasoning_content` = phần suy luận (dài)

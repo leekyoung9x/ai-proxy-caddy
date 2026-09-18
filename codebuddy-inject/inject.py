@@ -5,8 +5,9 @@ Khác biệt so với upstream nằm ở 3 điểm, phát hiện qua trace:
 
 1. Message đầu tiên trong `messages` PHẢI là role "system".
    Thiếu → `{"code":11128,"msg":"first message is not system prompt"}`.
-2. Header `X-User-Id` bắt buộc, phải khớp với accessToken.
-   Thiếu → backend không định danh được user.
+2. Header `X-User-Id` KHÔNG bắt buộc cho /v2/chat/completions.
+   Đã test: thiếu / rỗng / sai UUID đều trả HTTP 200. Chỉ Authorization mới cần.
+   (Adapter vẫn gửi nếu có cấu hình, để khớp hành vi CLI gốc.)
 3. SSE stream trả về field `credit` trong block `usage` cuối
    (= số credit đã tiêu thụ). Model free trả `credit: 0`.
 

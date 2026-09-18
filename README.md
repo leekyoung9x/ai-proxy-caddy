@@ -128,7 +128,7 @@ chuẩn (phát hiện qua trace):
 1. Message đầu tiên trong `messages` **phải** là `role: "system"`. Thiếu →
    `{"code":11128,"msg":"first message is not system prompt"}`. Adapter tự chèn
    nếu client không gửi.
-2. Header `X-User-Id` bắt buộc, phải khớp accessToken.
+2. Header `X-User-Id` **không** bắt buộc cho `/v2/chat/completions` (đã test: thiếu / rỗng / sai UUID đều HTTP 200). Chỉ `Authorization` mới cần.
 3. Credit tiêu thụ nằm ở `usage.credit` trong event cuối của SSE.
 
 Model free đã verify (`usage.credit = 0`) trên tài khoản hiện tại:
