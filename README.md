@@ -211,10 +211,22 @@ Thêm model mới (ví dụ `qwen-flash` → route-999). Checklist:
 3. **`MissingSessionID` từ opencode** → thiếu header `x-opencode-session`.
    9Router/OpenAI-compatible channel không forward custom header → gắn cứng
    tại proxy bằng `header_up`.
-4. **`FreeUsageLimitError / Rate limit exceeded`** → không phải lỗi proxy
+4. **`FreeTierError — free tier can only be used from within OpenCode` trên
+   combo `oc/...`** → 9Router có builtin provider `opencode` chiếm alias `oc`
+   (gọi thẳng `https://opencode.ai/zen/v1`, bypass shim). Node custom phải
+   dùng prefix `oczen`. Đổi prefix phải đổi đồng bộ 3 chỗ: providerNodes,
+   providerConnections (`providerSpecificData.prefix`) và combo models.
+5. **`content type input_text is not valid on assistant messages`** → lỗi schema
+   `/responses` từ shim khi convert chat → Responses: assistant phải dùng
+   `output_text`, system/developer phải đi `instructions` (đã fix trong
+   `oc-inject`, xem mục :8089).
+6. **`FreeUsageLimitError / Rate limit exceeded`** → không phải lỗi proxy
    (direct gọi thẳng upstream cũng vậy). Free tier hết quota / bị giới hạn theo
    IP — đổi session id hoặc chờ reset.
-5. **Khác Docker network** → container không resolve được tên service. Kiểm tra
+7. **Port nhầm khi test từ host**: `127.0.0.1:20128` là omniroute,
+   `127.0.0.1:20127` mới là 9Router. Bắn nhầm port sẽ thấy 500 "Internal server
+   error" không nguồn gốc, log 9Router trống.
+8. **Khác Docker network** → container không resolve được tên service. Kiểm tra
    bằng `docker network inspect <net>` và cho container cần gọi join cùng net.
 
 ## License
