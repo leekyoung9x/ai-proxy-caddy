@@ -94,6 +94,10 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
     `function_call_arguments.done`; (c) chỉ nằm trong `output_item.done`.
     Một khi đã có delta args thật, mọi event sau bị chặn phát lại args
     (ngược lại client nhận `{"command":...}{"command":...}` → JSON extra data).
+  - Lịch sử hội thoại lượt 2 cũng remap tool name: assistant `tool_calls`
+    name upstream (`bash`) đổi thành tool client thật (`terminal`) trước khi
+    gửi `function_call` lên Responses, để Muse không tưởng client vẫn có
+    `bash` rồi gọi tiếp `bash` vô hạn (identical_call_streak_halt).
   - Freebuff adapter có `GET /v1/models`; model list được công bố để 9Router
     không báo lỗi `501 Error fetching models`.
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này

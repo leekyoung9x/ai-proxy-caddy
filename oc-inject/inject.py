@@ -176,7 +176,7 @@ def sse_to_completion(raw, model):
     return obj
 
 
-def messages_to_input(data):
+def messages_to_input(data, client_tool_names=None):
     """Convert body chat.completions → body Responses API (dùng cho model
     chỉ chạy trên /responses như muse-spark).
 
@@ -209,7 +209,7 @@ def messages_to_input(data):
                 fn = tc.get("function") or {}
                 inp.append({"type": "function_call",
                             "call_id": tc.get("id") or gen_id("call"),
-                            "name": fn.get("name", ""),
+                            "name": _client_tool_name(fn.get("name", ""), client_tool_names),
                             "arguments": fn.get("arguments", "{}")})
             if texts:
                 inp.append({"type": "message", "role": "assistant",
@@ -577,7 +577,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not is_responses and REDIRECT_MODELS and \
                             data.get("model") in REDIRECT_MODELS:
                         # Model chỉ chạy trên /responses → convert và redirect.
-                        data = messages_to_input(data)
+                        data = messages_to_input(data, client_tool_names)
                         redirect_responses = True
                         is_responses = True
                         fixed = fix_tools(data, flat=True)
@@ -639,7 +639,8 @@ class Handler(BaseHTTPRequestHandler):
         dbg = os.environ.get("DEBUG_DUMP") == "1"
         print(f"REQ {model or '-'} session={fwd['x-opencode-session']} "
               f"request={fwd['x-opencode-request']} tools_fixed={fixed} "
-              f"collect={want_json} upstream_path={up_path}", flush=True)
+              f"collect={want_json} client_tools={','.join(sorted(client_tool_names)) or '-'} "
+              f"upstream_path={up_path}", flush=True)
         if dbg:
             print(f"BODY {self.path} :: {body[:900].decode('utf-8','replace')}",
                   flush=True)
@@ -703,8 +704,9 @@ class Handler(BaseHTTPRequestHandler):
             if redirect_responses:
                 # Client gọi /chat/completions (đã convert sang /responses) →
                 # phải trả về shape chat.completion, không phải Responses object.
-                comp = responses_sse_to_chat(raw.decode("utf-8", "replace"),
-                                             model or "unknown")
+                comp = responses_sse_to_chat(
+                    raw.decode("utf-8", "replace"), model or "unknown",
+                    client_tool_names)
             else:
                 from aggregate_responses import sse_to_response
                 obj = sse_to_response(raw.decode("utf-8", "replace"))
