@@ -379,6 +379,24 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                         "index": 0, "delta": {"tool_calls": [td]},
                         "finish_reason": None}]}) + "\n\n")
         elif typ == "response.function_call_arguments.done":
+            item = ev.get("item", {}) or {}
+            item_id = item.get("id") or ev.get("item_id")
+            call_key = (item.get("call_id") or item_to_call.get(item_id)
+                        or active_tool or (next(iter(tool_map), None)))
+            if not call_key:
+                continue
+            # Chống nghi ngờ: đảm bảo tool đã có tên trước khi kết thúc. Nếu
+            # chưa (upstream bỏ header), phát cặp header hoàn chỉnh trước.
+            info = tool_map.setdefault(call_key, {
+                "idx": len(tool_map), "id": call_key, "name": ""})
+            if info["idx"] not in emitted_tool_header:
+                emitted_tool_header.add(info["idx"])
+                out.append("data: " + json.dumps({
+                    "id": cid, "object": "chat.completion.chunk", "created": created,
+                    "model": model, "choices": [{"index": 0, "delta": {"tool_calls": [
+                    {"index": info["idx"], "id": info["id"], "type": "function",
+                     "function": {"name": info["name"], "arguments": ""}}]},
+                    "finish_reason": None}]}) + "\n\n")
             if not tool_finished:
                 tool_finished = True
                 out.append("data: " + json.dumps({
