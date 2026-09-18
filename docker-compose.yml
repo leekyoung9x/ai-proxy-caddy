@@ -37,6 +37,7 @@ services:
       UPSTREAM: "https://opencode.ai"
     volumes:
       - ./oc-inject/inject.py:/app/inject.py:ro
+      - ./oc-inject/aggregate_responses.py:/app/aggregate_responses.py:ro
     logging:
       driver: json-file
       options:

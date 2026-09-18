@@ -65,33 +65,41 @@ def gen_id(prefix):
     return f"{prefix}_{ts}{rnd}"
 
 
-def fix_tools(data):
-    """Đảm bảo mảng tools có đủ function OpenCode. Trả True nếu đã sửa."""
-    tools = data.get("tools")
-    if not isinstance(tools, list):
-        data["tools"] = [
-            {"type": "function", "function": {"name": n, "description": d,
-                                              "parameters": p}}
-            for n, (d, p) in _TOOL_DEFS.items()
-        ]
-        return True
-    have = set()
-    for t in tools:
+def fix_tools(data, flat=False):
+    """Đảm bảo mảng tools có đủ function OpenCode. Trả True nếu đã sửa.
+
+    flat=True: format Responses API ({"type":"function","name":...})
+    flat=False: format Chat Completions (name trong wrapper "function").
+    """
+    specs = [
+        {"type": "function", "name": n, "description": d, "parameters": p}
+        if flat else
+        {"type": "function", "function": {"name": n, "description": d,
+                                          "parameters": p}}
+        for n, (d, p) in _TOOL_DEFS.items()
+    ]
+
+    def tool_name(t):
         if not isinstance(t, dict):
-            continue
-        fn = t.get("function") if isinstance(t.get("function"), dict) else t
-        name = fn.get("name") if isinstance(fn, dict) else None
-        if isinstance(name, str):
-            have.add(name)
-    missing = [n for n in REQUIRED_TOOLS if n not in have]
-    if missing:
-        for n in missing:
-            d, p = _TOOL_DEFS[n]
-            tools.append({"type": "function",
-                          "function": {"name": n, "description": d,
-                                       "parameters": p}})
+            return None
+        if isinstance(t.get("function"), dict) and \
+                isinstance(t["function"].get("name"), str):
+            return t["function"]["name"]
+        return t.get("name") if isinstance(t.get("name"), str) else None
+
+    if not isinstance(data.get("tools"), list):
+        data["tools"] = specs
         return True
-    return False
+    tools = data["tools"]
+    have = {tool_name(t) for t in tools}
+    missing = [n for n in REQUIRED_TOOLS if n not in have]
+    if not missing:
+        return False
+    for s in specs:
+        name = (s.get("function") or s).get("name")
+        if name in missing:
+            tools.append(s)
+    return True
 
 
 def sse_to_completion(raw, model):
@@ -198,13 +206,14 @@ class Handler(BaseHTTPRequestHandler):
         fixed = False
         want_json = True  # OpenAI mặc định non-stream
         ctype = self.headers.get("Content-Type", "")
+        is_responses = "/responses" in self.path
         if body and "application/json" in ctype:
             try:
                 data = json.loads(body)
                 if isinstance(data, dict):
                     # Ghi nhớ ý client TRƯỚC khi ép stream cho upstream.
                     want_json = data.get("stream") is not True
-                    fixed = fix_tools(data)
+                    fixed = fix_tools(data, flat=is_responses)
                     # Zen free tier requires the OpenCode streaming/tool handshake.
                     data["stream"] = True
                     data["tool_choice"] = "auto"
@@ -252,9 +261,13 @@ class Handler(BaseHTTPRequestHandler):
             model = json.loads(body).get("model")
         except Exception:
             pass
+        dbg = os.environ.get("DEBUG_DUMP") == "1"
         print(f"REQ {model or '-'} session={fwd['x-opencode-session']} "
               f"request={fwd['x-opencode-request']} tools_fixed={fixed} "
               f"collect={want_json}", flush=True)
+        if dbg:
+            print(f"BODY {self.path} :: {body[:900].decode('utf-8','replace')}",
+                  flush=True)
 
         if not want_json or resp.status != 200:
             self.send_response(resp.status)
@@ -290,6 +303,12 @@ class Handler(BaseHTTPRequestHandler):
         if not is_sse:
             out = raw
             code = resp.status
+        elif is_responses:
+            from aggregate_responses import sse_to_response
+            obj = sse_to_response(raw.decode("utf-8", "replace"))
+            obj["model"] = model or "unknown"
+            out = json.dumps(obj).encode()
+            code = 200
         else:
             comp = sse_to_completion(raw.decode("utf-8", "replace"),
                                      model or "unknown")
