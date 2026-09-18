@@ -286,6 +286,43 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
             "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
 
 
+def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
+    """Đổi Responses SSE thành OpenAI chat.completion SSE.
+
+    9Router gọi /chat/completions với stream=true, nên không được passthrough
+    event type của Responses (response.output_text.delta): client sẽ coi đó là
+    empty stream dù upstream đã trả 200.
+    """
+    out = []
+    cid = gen_id("chatcmpl")
+    created = int(time.time())
+    for line in sse.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        raw = line[5:].strip()
+        if raw == "[DONE]":
+            continue
+        try:
+            ev = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        typ = ev.get("type", "")
+        if typ == "response.output_text.delta":
+            delta = {"role": "assistant", "content": ev.get("delta", "")}
+            out.append("data: " + json.dumps({
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model, "choices": [{"index": 0, "delta": delta,
+                "finish_reason": None}]}, ensure_ascii=False) + "\\n\\n")
+        elif typ in ("response.completed", "response.done"):
+            out.append("data: " + json.dumps({
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model, "choices": [{"index": 0, "delta": {},
+                "finish_reason": "stop"}]}) + "\\n\\n")
+    out.append("data: [DONE]\\n\\n")
+    return "".join(out).encode("utf-8")
+
+
 def read_body(handler):
     if handler.headers.get("Transfer-Encoding", "").lower() == "chunked":
         chunks = []
@@ -400,6 +437,26 @@ class Handler(BaseHTTPRequestHandler):
                   flush=True)
 
         if not want_json or resp.status != 200:
+            # Với chat→Responses và client stream=true, upstream trả Responses
+            # SSE. Phải đổi về chat.completion SSE; nếu passthrough nguyên event
+            # `response.output_text.delta`, 9Router kết luận stream rỗng.
+            if redirect_responses and resp.status == 200:
+                raw = resp.read()
+                conn.close()
+                out = responses_sse_to_chat_stream(
+                    raw.decode("utf-8", "replace"), model or "unknown")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.close_connection = True
+                try:
+                    self.wfile.write(out)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             self.send_response(resp.status)
             for k, v in resp.getheaders():
                 if k.lower() in HOP_HEADERS:
