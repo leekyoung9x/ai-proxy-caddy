@@ -296,6 +296,11 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
     created = int(time.time())
     types = []
     tool_args = []
+    tool_map = {}
+    item_to_call = {}
+    active_tool = None
+    emitted_tool_header = set()
+    tool_finished = False
     for line in sse.splitlines():
         line = line.strip()
         if not line.startswith("data:"):
@@ -317,32 +322,61 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                 "finish_reason": None}]}, ensure_ascii=False) + "\n\n")
         elif typ == "response.function_call_arguments.delta":
             # Responses function-call delta → OpenAI tool_calls delta.
-            item = ev.get("item", {})
-            tool_id = item.get("call_id") or item.get("id") or gen_id("call")
-            tool_name = item.get("name") or ""
-            tool_args.append(ev.get("delta", ""))
-            td = {"index": 0, "id": tool_id, "type": "function",
-                  "function": {"name": tool_name, "arguments": ev.get("delta", "")}}
+            item = ev.get("item", {}) or {}
+            item_id = item.get("id") or ev.get("item_id")
+            call_key = (item.get("call_id") or item_to_call.get(item_id)
+                        or active_tool or (next(iter(tool_map), None)) or "t0")
+            if item_id and item.get("call_id"):
+                item_to_call[item_id] = call_key
+            info = tool_map.setdefault(call_key, {
+                "idx": len(tool_map),
+                "id": item.get("call_id") or item.get("id") or gen_id("call"),
+                "name": item.get("name") or ""})
+            active_tool = call_key
+            chunk = ev.get("delta", "")
+            if info["idx"] not in emitted_tool_header and chunk:
+                emitted_tool_header.add(info["idx"])
+                td = {"index": info["idx"], "id": info["id"],
+                      "type": "function",
+                      "function": {"name": info["name"], "arguments": chunk}}
+            elif info["idx"] not in emitted_tool_header:
+                continue
+            else:
+                td = {"index": info["idx"],
+                      "function": {"arguments": chunk}}
             out.append("data: " + json.dumps({
                 "id": cid, "object": "chat.completion.chunk", "created": created,
                 "model": model, "choices": [{"index": 0,
                 "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
         elif typ == "response.output_item.added":
-            item = ev.get("item", {})
+            item = ev.get("item", {}) or {}
             if item.get("type") == "function_call":
-                tool_id = item.get("call_id") or item.get("id") or gen_id("call")
-                tool_name = item.get("name") or ""
-                td = {"index": 0, "id": tool_id, "type": "function",
-                      "function": {"name": tool_name, "arguments": ""}}
+                item_id = item.get("id")
+                call_key = item.get("call_id") or item_id or "t0"
+                if item_id:
+                    item_to_call[item_id] = call_key
+                info = tool_map.setdefault(call_key, {
+                    "idx": len(tool_map),
+                    "id": item.get("call_id") or item.get("id") or gen_id("call"),
+                    "name": item.get("name") or ""})
+                active_tool = call_key
+                if info["idx"] not in emitted_tool_header:
+                    emitted_tool_header.add(info["idx"])
+                    td = {"index": info["idx"], "id": info["id"],
+                          "type": "function",
+                          "function": {"name": info["name"], "arguments": ""}}
+                    out.append("data: " + json.dumps({
+                        "id": cid, "object": "chat.completion.chunk",
+                        "created": created, "model": model, "choices": [{
+                        "index": 0, "delta": {"tool_calls": [td]},
+                        "finish_reason": None}]}) + "\n\n")
+        elif typ == "response.function_call_arguments.done":
+            if not tool_finished:
+                tool_finished = True
                 out.append("data: " + json.dumps({
                     "id": cid, "object": "chat.completion.chunk", "created": created,
-                    "model": model, "choices": [{"index": 0,
-                    "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
-        elif typ in ("response.function_call_arguments.done",):
-            out.append("data: " + json.dumps({
-                "id": cid, "object": "chat.completion.chunk", "created": created,
-                "model": model, "choices": [{"index": 0, "delta": {},
-                "finish_reason": "tool_calls"}]}) + "\n\n")
+                    "model": model, "choices": [{"index": 0, "delta": {},
+                    "finish_reason": "tool_calls"}]}) + "\n\n")
         elif typ in ("response.completed", "response.done"):
             out.append("data: " + json.dumps({
                 "id": cid, "object": "chat.completion.chunk", "created": created,

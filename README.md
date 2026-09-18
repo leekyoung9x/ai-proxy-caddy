@@ -77,6 +77,8 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   - Tool-call events của Responses (`response.output_item.added`,
     `response.function_call_arguments.delta/done`) được đổi sang OpenAI
     `tool_calls`, để 9Router thực thi tool rồi gửi lượt hội thoại tiếp theo.
+    Các delta argument map cùng `item_id`/`call_id`, giữ nguyên `index` và không
+    phát header tool rỗng; nếu không client báo `Model generated invalid tool call`.
   - Freebuff adapter có `GET /v1/models`; model list được công bố để 9Router
     không báo lỗi `501 Error fetching models`.
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
