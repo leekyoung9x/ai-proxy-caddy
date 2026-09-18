@@ -45,6 +45,8 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 | `codebuddy-inject/inject.py` | Adapter CodeBuddy: chèn system message, log `usage.credit` |
 | `docker-compose.yml` | 5 container (caddy + `oc-inject` + `xq-inject` + `freebuff-inject` + `codebuddy-inject`), join network `root_poki-net` (external) |
 | `docs/FREE_AI_APIS.md` | Tài liệu reverse-engineer + curl đầy đủ cho cả 4 provider |
+| `docs/HUONG_DAN_TRACE_CHI_TIET.md` | Bản trace chi tiết, kèm script Python trọn gói |
+| `examples/*.py` | Client độc lập (không cần CLI): `opencode_free.py`, `freebuff_free.py`, `codebuddy_free.py` |
 | `.gitignore` | Bỏ qua data/volumes local |
 
 ## Cấu hình chi tiết
