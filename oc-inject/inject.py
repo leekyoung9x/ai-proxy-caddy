@@ -130,10 +130,8 @@ def sse_to_completion(raw, model):
             continue
         if isinstance(chunk.get("usage"), dict):
             usage = chunk["usage"]
-        if chunk.get("id"):
+        if chunk.get("id") and not chunk["id"].startswith("msg_"):
             cid = chunk["id"]
-        if chunk.get("created"):
-            created = chunk["created"]
         choices = chunk.get("choices") or []
         if not choices:
             continue
@@ -243,6 +241,9 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
     # response.completed … gộp text theo item message.
     txt_parts = []
     tool_calls = []
+    tool_acc = {}
+    item_to_call = {}
+    item_name = {}
     usage = {}
     # Gom text: nếu có delta events thì chỉ dùng delta (tránh double khi
     # response.completed lặp lại nội dung đã stream).
@@ -265,7 +266,26 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
         typ = ev.get("type", "")
         if typ == "response.output_text.delta":
             txt_parts.append(ev.get("delta", ""))
-        elif typ in ("response.completed", "response.done") and not has_deltas:
+        elif typ in ("response.output_item.added", "response.output_item.done"):
+            item = ev.get("item", {}) or {}
+            if item.get("type") == "function_call" and item.get("name"):
+                item_to_call[item.get("id") or ""] = (item.get("call_id")
+                                                      or item.get("id") or "t0")
+                item_name[item.get("id") or ""] = {
+                    "call_id": item.get("call_id") or item.get("id"),
+                    "name": item.get("name")}
+        elif typ == "response.function_call_arguments.delta":
+            item = ev.get("item", {}) or {}
+            item_id = item.get("id") or ev.get("item_id") or ""
+            call_key = (item.get("call_id") or item_to_call.get(item_id)
+                        or next(iter(item_name), "t0"))
+            meta = item_name.get(item_id) or item_name.get(call_key) or {}
+            acc = tool_acc.setdefault(call_key, {
+                "id": meta.get("call_id") or call_key,
+                "name": meta.get("name"), "args": []})
+            if isinstance(ev.get("delta"), str) and ev["delta"]:
+                acc["args"].append(ev["delta"])
+        elif typ in ("response.completed", "response.done"):
             resp_obj = ev.get("response", ev)
             for item in resp_obj.get("output", []):
                 if item.get("type") == "message":
@@ -276,7 +296,7 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
                                 txt_parts.append(t)
                 elif item.get("type") == "function_call":
                     tool_calls.append({
-                        "id": item.get("id") or gen_id("msg"),
+                        "id": item.get("call_id") or item.get("id") or gen_id("call"),
                         "type": "function",
                         "function": {"name": item.get("name"),
                                      "arguments": item.get("arguments", "{}")}})
@@ -286,6 +306,21 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
                          "completion_tokens": u.get("output_tokens", 0),
                          "total_tokens": u.get("input_tokens", 0) +
                                          u.get("output_tokens", 0)}
+            for item in resp_obj.get("output", []):
+                if item.get("type") != "function_call" or not item.get("name"):
+                    continue
+                ck = item.get("call_id") or item.get("id") or "t0"
+                item_to_call[item.get("id") or ""] = ck
+                item_name[item.get("id") or ""] = {
+                    "call_id": ck, "name": item.get("name")}
+                tool_acc.setdefault(ck, {"id": ck,
+                                         "name": item.get("name"),
+                                         "args": []})
+    tool_calls = []
+    for ck, acc in tool_acc.items():
+        tool_calls.append({"id": acc["id"], "type": "function",
+                           "function": {"name": acc["name"],
+                                        "arguments": "".join(acc["args"]) or "{}"}})
     text = "".join(txt_parts)
     msg = {"role": "assistant", "content": text or None}
     if tool_calls:
