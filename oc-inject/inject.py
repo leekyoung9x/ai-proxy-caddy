@@ -201,26 +201,34 @@ def messages_to_input(data):
             for c in content:
                 if isinstance(c, dict) and isinstance(c.get("text"), str):
                     texts.append(c["text"])
-        if not texts:
+        if not texts and role not in ("assistant", "tool"):
             continue
         if role in ("system", "developer"):
             instructions_parts.extend(texts)
             continue
         if role == "assistant":
-            blocks = [{"type": "output_text", "text": t} for t in texts]
-            inp.append({"type": "message", "role": "assistant",
-                        "content": blocks})
-        else:
-            blocks = [{"type": "input_text", "text": t} for t in texts]
-            inp.append({"type": "message", "role": "user", "content": blocks})
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                inp.append({"type": "function_call",
+                            "call_id": tc.get("id") or gen_id("call"),
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", "{}")})
+            if texts:
+                inp.append({"type": "message", "role": "assistant",
+                            "content": [{"type": "output_text", "text": t} for t in texts]})
+            continue
+        if role == "tool":
+            inp.append({"type": "function_call_output",
+                        "call_id": m.get("tool_call_id", ""),
+                        "output": content if isinstance(content, str) else json.dumps(content)})
+            continue
+        inp.append({"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": t} for t in texts]})
     out = {"model": data.get("model"),
            "input": inp,
-           "stream": True,          # /responses bắt buộc stream
+           "stream": True,
            "store": False,
            "instructions": "\n".join(instructions_parts),
-           # Responses tính cả reasoning vào output token budget; giữ
-           # max_tokens nhỏ của Chat Completions sẽ tạo response.incomplete
-           # (reason=max_output_tokens) và stream rỗng. Đặt sàn đủ cho muse.
            "max_output_tokens": max(16384, int(data.get("max_tokens") or 0))}
     return out
 
@@ -378,10 +386,11 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                     "model": model, "choices": [{"index": 0, "delta": {},
                     "finish_reason": "tool_calls"}]}) + "\n\n")
         elif typ in ("response.completed", "response.done"):
-            out.append("data: " + json.dumps({
-                "id": cid, "object": "chat.completion.chunk", "created": created,
-                "model": model, "choices": [{"index": 0, "delta": {},
-                "finish_reason": "stop"}]}) + "\n\n")
+            if not tool_finished:
+                out.append("data: " + json.dumps({
+                    "id": cid, "object": "chat.completion.chunk", "created": created,
+                    "model": model, "choices": [{"index": 0, "delta": {},
+                    "finish_reason": "stop"}]}) + "\n\n")
         elif typ == "response.incomplete":
             info = ev.get("response", ev)
             print("SSE_INCOMPLETE status=%s incomplete=%s error=%s" % (

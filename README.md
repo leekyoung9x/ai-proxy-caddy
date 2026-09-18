@@ -63,9 +63,11 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   env `REDIRECT_MODELS`) được shim convert từ chat → Responses và trả ngược
   shape `chat.completion`:
   - user message → `input_text`
-  - assistant message → `output_text` (bắt buộc, sai type → upstream 400
-    `content type input_text is not valid on assistant messages`)
+  - assistant message text → `output_text`; assistant tool call → `function_call`
+  - tool result → `function_call_output` (giữ `call_id`)
   - system/developer → gộp vào `instructions`
+  Nếu chỉ đổi SSE mà không đổi hai message này, lượt thứ hai sẽ gọi lại tool
+  hoặc dừng, dù lượt đầu đã có `finish_reason: tool_calls`.
   - text gom từ SSE delta, không nhân đôi với `response.completed`
   - client `stream:true` nhận lại đúng `chat.completion.chunk` SSE và `data: [DONE]`;
     không passthrough event Responses nguyên bản (`response.output_text.delta`),
