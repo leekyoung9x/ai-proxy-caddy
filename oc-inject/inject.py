@@ -22,6 +22,13 @@ from urllib.parse import urlparse
 PORT = int(os.environ.get("PORT", "8092"))
 UPSTREAM = os.environ.get("UPSTREAM", "https://opencode.ai")
 OC_VERSION = os.environ.get("OC_VERSION", "1.18.0")
+# Model chỉ chạy trên /responses của Zen (chat/completions → 500).
+# Env: REDIRECT_MODELS=muse-spark-1.3-contributor-free,other-model
+REDIRECT_MODELS = {
+    m.strip() for m in
+    os.environ.get("REDIRECT_MODELS", "muse-spark-1.3-contributor-free").split(",")
+    if m.strip()
+}
 
 _UP = urlparse(UPSTREAM)
 _UP_HOST = _UP.hostname or "opencode.ai"
@@ -171,6 +178,114 @@ def sse_to_completion(raw, model):
     return obj
 
 
+def messages_to_input(data):
+    """Convert body chat.completions → body Responses API (dùng cho model
+    chỉ chạy trên /responses như muse-spark).
+
+    Lưu ý schema /responses:
+    - user message  → content [{type: input_text, text}]
+    - assistant msg → content [{type: output_text, text}]
+    - system/developer → đặt vào instructions (KHÔNG đưa vào input).
+    """
+    inp = []
+    instructions_parts = []
+    for m in data.get("messages") or []:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role", "user")
+        content = m.get("content")
+        texts = []
+        if isinstance(content, str):
+            texts = [content]
+        elif isinstance(content, list):
+            for c in content:
+                if isinstance(c, dict) and isinstance(c.get("text"), str):
+                    texts.append(c["text"])
+        if not texts:
+            continue
+        if role in ("system", "developer"):
+            instructions_parts.extend(texts)
+            continue
+        if role == "assistant":
+            blocks = [{"type": "output_text", "text": t} for t in texts]
+            inp.append({"type": "message", "role": "assistant",
+                        "content": blocks})
+        else:
+            blocks = [{"type": "input_text", "text": t} for t in texts]
+            inp.append({"type": "message", "role": "user", "content": blocks})
+    out = {"model": data.get("model"),
+           "input": inp,
+           "stream": True,          # /responses bắt buộc stream
+           "store": False,
+           "instructions": "\n".join(instructions_parts),
+           "max_output_tokens": data.get("max_tokens") or 1024}
+    return out
+
+
+def responses_sse_to_chat(sse: str, model: str) -> dict:
+    """Gom SSE của /responses thành 1 object chat.completion chuẩn OpenAI.
+
+    messages_to_input() chuyển chat sang Responses; hàm này chuyển kết quả
+    trở lại shape chat.completion để client (9Router) đọc đúng.
+    """
+    # Gom event dạng OpenAI Responses: response.output_text.delta /
+    # response.completed … gộp text theo item message.
+    txt_parts = []
+    tool_calls = []
+    usage = {}
+    # Gom text: nếu có delta events thì chỉ dùng delta (tránh double khi
+    # response.completed lặp lại nội dung đã stream).
+    has_deltas = False
+    for line in sse.splitlines():
+        if '"response.output_text.delta"' in line:
+            has_deltas = True
+            break
+    for line in sse.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            ev = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        typ = ev.get("type", "")
+        if typ == "response.output_text.delta":
+            txt_parts.append(ev.get("delta", ""))
+        elif typ in ("response.completed", "response.done") and not has_deltas:
+            resp_obj = ev.get("response", ev)
+            for item in resp_obj.get("output", []):
+                if item.get("type") == "message":
+                    for c in item.get("content", []):
+                        if c.get("type") == "output_text":
+                            t = c.get("text", "")
+                            if t and t not in txt_parts:
+                                txt_parts.append(t)
+                elif item.get("type") == "function_call":
+                    tool_calls.append({
+                        "id": item.get("id") or gen_id("msg"),
+                        "type": "function",
+                        "function": {"name": item.get("name"),
+                                     "arguments": item.get("arguments", "{}")}})
+            u = resp_obj.get("usage") or {}
+            if u:
+                usage = {"prompt_tokens": u.get("input_tokens", 0),
+                         "completion_tokens": u.get("output_tokens", 0),
+                         "total_tokens": u.get("input_tokens", 0) +
+                                         u.get("output_tokens", 0)}
+    text = "".join(txt_parts)
+    msg = {"role": "assistant", "content": text or None}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+        msg["content"] = None
+    return {"id": gen_id("msg"), "object": "chat.completion", "created": int(time.time()), "model": model,
+            "choices": [{"index": 0, "message": msg,
+                         "finish_reason": "tool_calls" if tool_calls else "stop"}],
+            "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
+
+
 def read_body(handler):
     if handler.headers.get("Transfer-Encoding", "").lower() == "chunked":
         chunks = []
@@ -207,20 +322,35 @@ class Handler(BaseHTTPRequestHandler):
         want_json = True  # OpenAI mặc định non-stream
         ctype = self.headers.get("Content-Type", "")
         is_responses = "/responses" in self.path
+        redirect_responses = False  # chat→responses cho model chỉ hỗ trợ /responses
         if body and "application/json" in ctype:
             try:
                 data = json.loads(body)
                 if isinstance(data, dict):
                     # Ghi nhớ ý client TRƯỚC khi ép stream cho upstream.
                     want_json = data.get("stream") is not True
-                    fixed = fix_tools(data, flat=is_responses)
-                    # Zen free tier requires the OpenCode streaming/tool handshake.
-                    data["stream"] = True
-                    data["tool_choice"] = "auto"
-                    fixed = True
+                    if not is_responses and REDIRECT_MODELS and \
+                            data.get("model") in REDIRECT_MODELS:
+                        # Model chỉ chạy trên /responses → convert và redirect.
+                        data = messages_to_input(data)
+                        redirect_responses = True
+                        is_responses = True
+                        fixed = fix_tools(data, flat=True)
+                    else:
+                        fixed = fix_tools(data, flat=is_responses)
+                        # Zen free tier requires the streaming/tool handshake.
+                        data["stream"] = True
+                        data["tool_choice"] = "auto"
+                        fixed = True
                     body = json.dumps(data, separators=(",", ":")).encode()
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
+
+        up_path = self.path
+        if redirect_responses:
+            up_path = self.path.replace("/chat/completions", "/responses") \
+                if "/chat/completions" in self.path else \
+                self.path.rsplit("/v1/", 1)[0] + "/v1/responses"
 
         conn = HTTPSConnection(_UP_HOST, _UP.port or 443, timeout=120)
         fwd = {}
@@ -245,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
             fwd.pop("Content-Length", None)
 
         try:
-            conn.request(self.command, self.path, body=body or None, headers=fwd)
+            conn.request(self.command, up_path, body=body or None, headers=fwd)
             resp = conn.getresponse()
         except Exception as e:
             self.send_response(502)
@@ -264,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
         dbg = os.environ.get("DEBUG_DUMP") == "1"
         print(f"REQ {model or '-'} session={fwd['x-opencode-session']} "
               f"request={fwd['x-opencode-request']} tools_fixed={fixed} "
-              f"collect={want_json}", flush=True)
+              f"collect={want_json} upstream_path={up_path}", flush=True)
         if dbg:
             print(f"BODY {self.path} :: {body[:900].decode('utf-8','replace')}",
                   flush=True)
@@ -304,11 +434,21 @@ class Handler(BaseHTTPRequestHandler):
             out = raw
             code = resp.status
         elif is_responses:
-            from aggregate_responses import sse_to_response
-            obj = sse_to_response(raw.decode("utf-8", "replace"))
-            obj["model"] = model or "unknown"
-            out = json.dumps(obj).encode()
-            code = 200
+            if redirect_responses:
+                # Client gọi /chat/completions (đã convert sang /responses) →
+                # phải trả về shape chat.completion, không phải Responses object.
+                comp = responses_sse_to_chat(raw.decode("utf-8", "replace"),
+                                             model or "unknown")
+            else:
+                from aggregate_responses import sse_to_response
+                obj = sse_to_response(raw.decode("utf-8", "replace"))
+                obj["model"] = model or "unknown"
+                out = json.dumps(obj).encode()
+                code = 200
+                comp = None
+            if comp is not None:
+                out = json.dumps(comp).encode()
+                code = 200
         else:
             comp = sse_to_completion(raw.decode("utf-8", "replace"),
                                      model or "unknown")
