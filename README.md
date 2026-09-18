@@ -69,6 +69,7 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   Nếu chỉ đổi SSE mà không đổi hai message này, lượt thứ hai sẽ gọi lại tool
   hoặc dừng, dù lượt đầu đã có `finish_reason: tool_calls`.
   - text gom từ SSE delta, không nhân đôi với `response.completed`
+  - `ping`/comment lines được bỏ qua, chỉ log event type (không log body)
   - client `stream:true` nhận lại đúng `chat.completion.chunk` SSE và `data: [DONE]`;
     không passthrough event Responses nguyên bản (`response.output_text.delta`),
     vì 9Router sẽ coi stream đó là rỗng
