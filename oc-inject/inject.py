@@ -343,6 +343,7 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
     item_to_call = {}
     active_tool = None
     emitted_tool_header = set()
+    tool_args_done = {}
     tool_finished = False
     for line in sse.splitlines():
         line = line.strip()
@@ -377,6 +378,9 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                 "name": item.get("name") or ""})
             active_tool = call_key
             chunk = ev.get("delta", "")
+            if chunk:
+                # Có delta thật → chặn mọi phát args lặp từ done/item.done.
+                tool_args_done[call_key] = True
             if info["idx"] not in emitted_tool_header and chunk:
                 emitted_tool_header.add(info["idx"])
                 td = {"index": info["idx"], "id": info["id"],
@@ -413,6 +417,48 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                         "created": created, "model": model, "choices": [{
                         "index": 0, "delta": {"tool_calls": [td]},
                         "finish_reason": None}]}) + "\n\n")
+        elif typ == "response.output_item.done":
+            item = ev.get("item", {}) or {}
+            if item.get("type") == "function_call":
+                item_id = item.get("id")
+                call_key = (item.get("call_id") or item_id
+                            or item_to_call.get(item_id) or active_tool
+                            or (next(iter(tool_map), None)) or "t0")
+                if item_id:
+                    item_to_call[item_id] = call_key
+                info = tool_map.setdefault(call_key, {
+                    "idx": len(tool_map), "id": call_key, "name": ""})
+                if item.get("name") and not info["name"]:
+                    info["name"] = item.get("name")
+                if info["idx"] not in emitted_tool_header and \
+                        (info["name"] or item.get("arguments")):
+                    emitted_tool_header.add(info["idx"])
+                    td = {"index": info["idx"], "id": info["id"],
+                          "type": "function",
+                          "function": {"name": info["name"] or "unknown",
+                                       "arguments": ""}}
+                    out.append("data: " + json.dumps({
+                        "id": cid, "object": "chat.completion.chunk", "created": created,
+                        "model": model, "choices": [{"index": 0,
+                        "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
+                # Upstream có thể chỉ gửi arguments trong item.done — nếu chưa
+                # có delta/done nào phát args thì dùng chính event này.
+                final_args2 = item.get("arguments")
+                if isinstance(final_args2, str) and final_args2 and \
+                        not tool_args_done.get(call_key):
+                    tool_args_done[call_key] = True
+                    td = {"index": info["idx"],
+                          "function": {"arguments": final_args2}}
+                    out.append("data: " + json.dumps({
+                        "id": cid, "object": "chat.completion.chunk", "created": created,
+                        "model": model, "choices": [{"index": 0,
+                        "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
+                if not tool_finished and tool_map.get(call_key) is info:
+                    tool_finished = True
+                    out.append("data: " + json.dumps({
+                        "id": cid, "object": "chat.completion.chunk", "created": created,
+                        "model": model, "choices": [{"index": 0, "delta": {},
+                        "finish_reason": "tool_calls"}]}) + "\n\n")
         elif typ == "response.function_call_arguments.done":
             item = ev.get("item", {}) or {}
             item_id = item.get("id") or ev.get("item_id")
@@ -420,11 +466,24 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                         or active_tool or (next(iter(tool_map), None)))
             if not call_key:
                 continue
-            # Chống nghi ngờ: đảm bảo tool đã có tên trước khi kết thúc. Nếu
-            # chưa (upstream bỏ header), phát cặp header hoàn chỉnh trước.
             info = tool_map.setdefault(call_key, {
                 "idx": len(tool_map), "id": call_key, "name": ""})
-            if info["idx"] not in emitted_tool_header:
+            if item.get("name") and not info["name"]:
+                info["name"] = item.get("name")
+            # Một số upstream chỉ gửi arguments trong event done, không có
+            # delta — phát luôn như một argument chunk cuối.
+            final_args = ev.get("arguments")
+            if isinstance(final_args, str) and final_args and \
+                    call_key in tool_map and \
+                    final_args and not tool_args_done.get(call_key):
+                tool_args_done[call_key] = True
+                td = {"index": info["idx"],
+                      "function": {"arguments": final_args}}
+                out.append("data: " + json.dumps({
+                    "id": cid, "object": "chat.completion.chunk", "created": created,
+                    "model": model, "choices": [{"index": 0,
+                    "delta": {"tool_calls": [td]}, "finish_reason": None}]}) + "\n\n")
+            if info["idx"] not in emitted_tool_header and final_args:
                 emitted_tool_header.add(info["idx"])
                 out.append("data: " + json.dumps({
                     "id": cid, "object": "chat.completion.chunk", "created": created,

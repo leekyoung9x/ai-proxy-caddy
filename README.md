@@ -82,6 +82,12 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
     `tool_calls`, để 9Router thực thi tool rồi gửi lượt hội thoại tiếp theo.
     Các delta argument map cùng `item_id`/`call_id`, giữ nguyên `index` và không
     phát header tool rỗng; nếu không client báo `Model generated invalid tool call`.
+    Arguments upstream gửi lộn xộn theo 3 dạng, shim chấp nhận cả ba và
+    KHÔNG nhân đôi:
+    (a) delta → done (chuẩn); (b) chỉ `arguments` nằm trong event
+    `function_call_arguments.done`; (c) chỉ nằm trong `output_item.done`.
+    Một khi đã có delta args thật, mọi event sau bị chặn phát lại args
+    (ngược lại client nhận `{"command":...}{"command":...}` → JSON extra data).
   - Freebuff adapter có `GET /v1/models`; model list được công bố để 9Router
     không báo lỗi `501 Error fetching models`.
 - 9Router node "OpenCode Zen" prefix **`oczen`** trỏ về base URL này
