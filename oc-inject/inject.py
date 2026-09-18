@@ -231,7 +231,16 @@ def messages_to_input(data):
     return out
 
 
-def responses_sse_to_chat(sse: str, model: str) -> dict:
+def _client_tool_name(name, client_tool_names):
+    """Đổi tên tool upstream về đúng tên tool mà client thật đăng ký."""
+    if not name or not client_tool_names or name in client_tool_names:
+        return name
+    aliases = {"bash": "terminal", "read": "read_file", "edit": "edit_file"}
+    target = aliases.get(name)
+    return target if target in client_tool_names else name
+
+
+def responses_sse_to_chat(sse: str, model: str, client_tool_names=None) -> dict:
     """Gom SSE của /responses thành 1 object chat.completion chuẩn OpenAI.
 
     messages_to_input() chuyển chat sang Responses; hàm này chuyển kết quả
@@ -319,7 +328,7 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
     tool_calls = []
     for ck, acc in tool_acc.items():
         tool_calls.append({"id": acc["id"], "type": "function",
-                           "function": {"name": acc["name"],
+                           "function": {"name": _client_tool_name(acc["name"], client_tool_names),
                                         "arguments": "".join(acc["args"]) or "{}"}})
     text = "".join(txt_parts)
     msg = {"role": "assistant", "content": text or None}
@@ -332,7 +341,7 @@ def responses_sse_to_chat(sse: str, model: str) -> dict:
             "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
 
 
-def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
+def responses_sse_to_chat_stream(sse: str, model: str, client_tool_names=None) -> bytes:
     """Translate Responses SSE into OpenAI chat.completion SSE."""
     out = []
     cid = gen_id("chatcmpl")
@@ -385,7 +394,7 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                 emitted_tool_header.add(info["idx"])
                 td = {"index": info["idx"], "id": info["id"],
                       "type": "function",
-                      "function": {"name": info["name"], "arguments": chunk}}
+                      "function": {"name": _client_tool_name(info["name"], client_tool_names), "arguments": chunk}}
             elif info["idx"] not in emitted_tool_header:
                 continue
             else:
@@ -411,7 +420,7 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                     emitted_tool_header.add(info["idx"])
                     td = {"index": info["idx"], "id": info["id"],
                           "type": "function",
-                          "function": {"name": info["name"], "arguments": ""}}
+                          "function": {"name": _client_tool_name(info["name"], client_tool_names), "arguments": ""}}
                     out.append("data: " + json.dumps({
                         "id": cid, "object": "chat.completion.chunk",
                         "created": created, "model": model, "choices": [{
@@ -489,7 +498,7 @@ def responses_sse_to_chat_stream(sse: str, model: str) -> bytes:
                     "id": cid, "object": "chat.completion.chunk", "created": created,
                     "model": model, "choices": [{"index": 0, "delta": {"tool_calls": [
                     {"index": info["idx"], "id": info["id"], "type": "function",
-                     "function": {"name": info["name"], "arguments": ""}}]},
+                     "function": {"name": _client_tool_name(info["name"], client_tool_names), "arguments": ""}}]},
                     "finish_reason": None}]}) + "\n\n")
             if not tool_finished:
                 tool_finished = True
@@ -551,10 +560,18 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "")
         is_responses = "/responses" in self.path
         redirect_responses = False  # chat→responses cho model chỉ hỗ trợ /responses
+        client_tool_names = set()
         if body and "application/json" in ctype:
             try:
                 data = json.loads(body)
                 if isinstance(data, dict):
+                    raw_tools = data.get("tools")
+                    if isinstance(raw_tools, list):
+                        for t in raw_tools:
+                            if isinstance(t, dict):
+                                fn = t.get("function") if isinstance(t.get("function"), dict) else t
+                                if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+                                    client_tool_names.add(fn["name"])
                     # Ghi nhớ ý client TRƯỚC khi ép stream cho upstream.
                     want_json = data.get("stream") is not True
                     if not is_responses and REDIRECT_MODELS and \
@@ -635,7 +652,8 @@ class Handler(BaseHTTPRequestHandler):
                 raw = resp.read()
                 conn.close()
                 out = responses_sse_to_chat_stream(
-                    raw.decode("utf-8", "replace"), model or "unknown")
+                    raw.decode("utf-8", "replace"), model or "unknown",
+                    client_tool_names)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")

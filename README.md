@@ -82,6 +82,12 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
     `tool_calls`, để 9Router thực thi tool rồi gửi lượt hội thoại tiếp theo.
     Các delta argument map cùng `item_id`/`call_id`, giữ nguyên `index` và không
     phát header tool rỗng; nếu không client báo `Model generated invalid tool call`.
+    - Tool name downstream phải là tên tool client thật đăng ký. Nếu upstream trả
+      `bash` nhưng request client chỉ có `terminal`, shim remap `bash → terminal`
+      (tương tự `read → read_file`, `edit → edit_file`) để Hermes không báo
+      `Model generated invalid tool call`.
+      Lưu ý: remap chỉ áp dụng khi request thật có tool đích; nếu client không
+      khai báo `terminal`, shim giữ nguyên tên upstream để không làm sai contract.
     Arguments upstream gửi lộn xộn theo 3 dạng, shim chấp nhận cả ba và
     KHÔNG nhân đôi:
     (a) delta → done (chuẩn); (b) chỉ `arguments` nằm trong event
