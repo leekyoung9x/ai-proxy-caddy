@@ -57,9 +57,10 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   (áp cho cả `/chat/completions` lẫn `/responses` — endpoint Responses dùng
   format tools khác: `{"type":"function","name":...}` không có wrapper `function`).
 - Response là SSE streaming passthrough với client xin stream; client non-stream
-  nhưng nhận JSON chuẩn (aggregator văn bản trực tiếp cho chat.completion).
-- Base URL cho client: `http://opencode-proxy:8089/v1` (Docker) hoặc
-  `http://127.0.0.1:8089/v1` (host).
+  nhận JSON chuẩn (`chat.completion` cho /chat/completions,
+  `response` object cho /responses).
+- 9Router node "OpenCode Zen" prefix `oc` trỏ về base URL này
+  (`http://opencode-proxy:8089/v1`, key `public`).
 
 ### :8088 → OpenRouter (`https://openrouter.ai`)
 
