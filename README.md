@@ -156,6 +156,14 @@ flow (`POST /v2/plugin/auth/state` → mở `authUrl` → `GET
 /v2/plugin/auth/token?state=...`), `expiresIn` ≈ 365 ngày nên không cần refresh.
 Đặt `CODEBUDDY_TOKEN` + `CODEBUDDY_USER_ID` trong `.env` của stack.
 
+**Trạng thái live trên VPS (verified 2026-09-19):** node `CodeBuddy Free` đã add
+vào 9Router với prefix `cb` (`http://opencode-proxy:8085/v1`), E2E qua
+`127.0.0.1:20127` OK: `cb/hy3` (non-stream + stream), `cb/deepseek-v4.1-flash`,
+credit = 0. Lưu ý khi thêm node kiểu này bằng SQL: connection row trong
+`providerConnections` PHẢI copy `prefix/apiType/baseUrl/nodeName` vào
+`providerSpecificData`, nếu thiếu 9Router fallback về `api.openai.com` và trả
+401 `Incorrect API key provided`.
+
 ### :8086 → Freebuff/Codebuff
 
 Adapter nội bộ tại `freebuff-inject:8093` thực hiện đúng flow của Freebuff:

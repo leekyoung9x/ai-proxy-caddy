@@ -1,11 +1,3 @@
-:8089 {
-	handle_path /v1/* {
-		rewrite * /zen/v1{path}
-
-		reverse_proxy http://oc-inject:8092
-	}
-}
-
 :8088 {
 	reverse_proxy https://openrouter.ai {
 		header_up Host openrouter.ai

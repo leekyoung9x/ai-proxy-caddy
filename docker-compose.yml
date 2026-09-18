@@ -7,7 +7,6 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     ports:
-      - "127.0.0.1:8089:8089"
       - "127.0.0.1:8088:8088"
       - "127.0.0.1:8087:8087"
       - "127.0.0.1:8086:8086"
@@ -24,29 +23,6 @@ services:
     networks:
       - poki-net
 
-  # OpenCode Zen anticheat wrapper: gắn Bearer public + ses_/msg_ id + tools
-  # bắt buộc. Caddy :8089 forward vào đây, service này forward lên opencode.ai.
-  oc-inject:
-    image: python:3.12-alpine
-    container_name: oc-inject
-    restart: always
-    command: ["python3", "/app/inject.py"]
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    environment:
-      PORT: "8092"
-      UPSTREAM: "https://opencode.ai"
-    volumes:
-      - ./oc-inject/inject.py:/app/inject.py:ro
-      - ./oc-inject/aggregate_responses.py:/app/aggregate_responses.py:ro
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - poki-net
 
   # Freebuff (codebuff) free agent adapter: admission -> agent-runs ->
   # chat/completions với codebuff_metadata. Token đọc từ env FREEBUFF_TOKEN
