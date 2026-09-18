@@ -11,12 +11,8 @@ TOKEN = os.environ.get("FREEBUFF_TOKEN", "")
 USER_ID = os.environ.get("FREEBUFF_USER_ID", "")
 UA = "ai-sdk/openai-compatible/0.0.0-test/codebuff"
 AGENTS = {
+    # Verified live on the current Freebuff account/session.
     "deepseek/deepseek-v4-flash": "base2-free-deepseek-flash",
-    "deepseek/deepseek-v4-pro": "base2-free-deepseek",
-    "mimo/mimo-v2.5": "base2-free-mimo",
-    "minimax/minimax-m3": "base2-free-minimax-m3",
-    "openai/gpt-5.6-luna": "base2-free-luna",
-    "z-ai/glm-5.3-flash-2026-09-05": "base2-free-glm",
 }
 
 def request_json(path, body=None, extra=None):

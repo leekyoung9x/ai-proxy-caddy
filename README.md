@@ -90,15 +90,14 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
 
 Adapter nội bộ tại `freebuff-inject:8093` thực hiện đúng flow của Freebuff:
 `session/admission` → `agent-runs` (`START`) → `/chat/completions` với
-`codebuff_metadata`. Model/agent map hiện hỗ trợ:
+`codebuff_metadata`. Model/agent map: **chỉ công bố model đã verify sống** trên tài khoản hiện tại.
+Các combo khác từ tài liệu (`v4-pro`, `mimo`, `minimax`, `luna`, `glm`) đều bị
+Freebuff từ chối (`session_model_mismatch`, `model_locked`,
+`free_mode_legacy_luna_agent`, `free_mode_invalid_agent_model`) — không đưa vào
+`/v1/models` để tránh 9Router hiện model ảo rồi 403:
 
 ```text
-deepseek/deepseek-v4-flash       → base2-free-deepseek-flash
-deepseek/deepseek-v4-pro         → base2-free-deepseek
-mimo/mimo-v2.5                    → base2-free-mimo
-minimax/minimax-m3               → base2-free-minimax-m3
-openai/gpt-5.6-luna              → base2-free-luna
-z-ai/glm-5.3-flash-2026-09-05    → base2-free-glm
+deepseek/deepseek-v4-flash → base2-free-deepseek-flash
 ```
 
 Endpoint cho 9Router: `http://opencode-proxy:8086/v1`. Adapter tự thêm system
