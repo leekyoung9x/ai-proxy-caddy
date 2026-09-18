@@ -53,8 +53,11 @@ public endpoint, đồng thời tự gắn header/auth mà client không gửi �
   `x-opencode-session`/`x-opencode-request` đúng dạng `ses_`/`msg_` + ID,
   `x-opencode-client: cli`, `x-opencode-project: global`, User-Agent OpenCode 1.18.
 - Body JSON được bổ sung 5 tool OpenCode (`bash`, `edit`, `glob`, `grep`, `read`),
-  ép `stream:true` và `tool_choice:auto` để match handshake free tier.
-- Response là SSE streaming passthrough; client phải hỗ trợ stream.
+  ép `stream:true` và `tool_choice:auto` để match handshake free tier
+  (áp cho cả `/chat/completions` lẫn `/responses` — endpoint Responses dùng
+  format tools khác: `{"type":"function","name":...}` không có wrapper `function`).
+- Response là SSE streaming passthrough với client xin stream; client non-stream
+  nhưng nhận JSON chuẩn (aggregator văn bản trực tiếp cho chat.completion).
 - Base URL cho client: `http://opencode-proxy:8089/v1` (Docker) hoặc
   `http://127.0.0.1:8089/v1` (host).
 
