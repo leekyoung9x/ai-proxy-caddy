@@ -156,6 +156,12 @@ flow (`POST /v2/plugin/auth/state` → mở `authUrl` → `GET
 /v2/plugin/auth/token?state=...`), `expiresIn` ≈ 365 ngày nên không cần refresh.
 Đặt `CODEBUDDY_TOKEN` + `CODEBUDDY_USER_ID` trong `.env` của stack.
 
+**2026-09-19: `hy4-preview-f` đã đưa vào `/v1/models` (env
+`CODEBUDDY_MODELS=hy3,deepseek-v4.1-flash,hy4-preview-f`), E2E qua 9Router OK,
+credit = 0. Lưu ý: TTFT ~100s (thinking model) → 9Router phải tăng
+`FETCH_CONNECT_TIMEOUT_MS` (mặc định 60s → 150000) nếu không sẽ 502
+`fetch connect timeout`. Trial 14 ngày vẫn đúng — hết hạn thì bỏ khỏi list.
+
 **Trạng thái live trên VPS (verified 2026-09-19):** node `CodeBuddy Free` đã add
 vào 9Router với prefix `cb` (`http://opencode-proxy:8085/v1`), E2E qua
 `127.0.0.1:20127` OK: `cb/hy3` (non-stream + stream), `cb/deepseek-v4.1-flash`,
